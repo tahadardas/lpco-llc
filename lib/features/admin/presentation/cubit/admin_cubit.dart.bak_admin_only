@@ -1,0 +1,70 @@
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:lpco_llc/features/admin/data/repositories/admin_repository.dart';
+import 'package:lpco_llc/features/admin/domain/admin_module.dart';
+
+abstract class AdminState {
+  const AdminState();
+}
+
+class AdminInitial extends AdminState {
+  const AdminInitial();
+}
+
+class AdminLoading extends AdminState {
+  const AdminLoading();
+}
+
+class AdminLoaded extends AdminState {
+  final List<AdminModule> modules;
+  final Map<String, dynamic> stats;
+  final Set<String> discoveredRoutes;
+
+  const AdminLoaded({
+    required this.modules,
+    required this.stats,
+    required this.discoveredRoutes,
+  });
+}
+
+class AdminError extends AdminState {
+  final String message;
+  const AdminError(this.message);
+}
+
+class AdminCubit extends Cubit<AdminState> {
+  final AdminRepository _repository;
+
+  AdminCubit({AdminRepository? repository})
+    : _repository = repository ?? AdminRepository(),
+      super(const AdminInitial());
+
+  Future<void> fetchDashboard() async {
+    emit(const AdminLoading());
+
+    try {
+      final discovered = await _repository.discoverModules();
+      final hasStats = discovered.modules.any(
+        (module) => module.kind == AdminModuleKind.stats && module.isAvailable,
+      );
+
+      Map<String, dynamic> stats = const <String, dynamic>{};
+      if (hasStats) {
+        try {
+          stats = await _repository.fetchStats();
+        } catch (_) {
+          stats = const <String, dynamic>{};
+        }
+      }
+
+      emit(
+        AdminLoaded(
+          modules: discovered.modules,
+          stats: stats,
+          discoveredRoutes: discovered.routes,
+        ),
+      );
+    } catch (e) {
+      emit(AdminError(e.toString().replaceAll('Exception: ', '')));
+    }
+  }
+}

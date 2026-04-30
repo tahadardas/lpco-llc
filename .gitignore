@@ -1,0 +1,32 @@
+# Build outputs
+build/
+.dart_tool/
+android/app/build/
+android/build/
+ios/Pods/
+macos/Flutter/ephemeral/
+
+# Archives
+*.zip
+*.rar
+*.7z
+
+# Backups / temp
+backup_codex/
+backup_refactor/
+tmp_*/
+_tmp_*.json
+*.bak
+*.backup
+
+# WordPress dependencies
+wp/**/vendor/
+
+# Secrets / signing
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
+*.jks
+*.keystore
+.env
+*.env

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  flutter:
+    name: Flutter Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build APK (Debug)
+        run: flutter build apk --debug
+
+  php-lint:
+    name: PHP Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+
+      - name: Lint plugin PHP files
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="wp/dms-ecom-complete-v7-enhanced-fixed - NEW20-7-2025 (3) (2) (1)"
+          if [[ ! -d "$plugin_dir" ]]; then
+            echo "Plugin directory not found: $plugin_dir"
+            exit 1
+          fi
+
+          find "$plugin_dir" -type f -name '*.php' -print0 | while IFS= read -r -d '' file; do
+            php -l "$file"
+          done

@@ -1,0 +1,426 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+import 'package:lpco_llc/app/router/app_routes.dart';
+import 'package:lpco_llc/app/shell/navigation_shell.dart';
+
+import 'package:lpco_llc/features/admin/presentation/screens/admin_dashboard_screen.dart';
+import 'package:lpco_llc/features/admin/presentation/screens/admin_module_screen.dart';
+import 'package:lpco_llc/features/admin/presentation/screens/admin_order_details_screen.dart';
+import 'package:lpco_llc/features/account/presentation/screens/account_screen.dart';
+import 'package:lpco_llc/features/account/presentation/screens/edit_profile_screen.dart';
+import 'package:lpco_llc/features/account/presentation/screens/security_settings_screen.dart';
+import 'package:lpco_llc/features/auth/presentation/cubit/auth_cubit.dart';
+import 'package:lpco_llc/features/auth/presentation/screens/login_screen.dart';
+import 'package:lpco_llc/features/auth/presentation/screens/register_screen.dart';
+import 'package:lpco_llc/features/cart/presentation/screens/cart_screen.dart';
+import 'package:lpco_llc/features/checkout/presentation/screens/checkout_screen.dart';
+import 'package:lpco_llc/features/contact/presentation/screens/contact_screen.dart';
+import 'package:lpco_llc/features/home/presentation/screens/home_screen.dart';
+import 'package:lpco_llc/features/jobs/presentation/screens/jobs_screen.dart';
+import 'package:lpco_llc/features/notifications/presentation/screens/notifications_screen.dart';
+import 'package:lpco_llc/features/orders/presentation/screens/orders_screen.dart';
+import 'package:lpco_llc/features/orders/data/models/order_model.dart';
+import 'package:lpco_llc/features/orders/presentation/screens/order_details_screen.dart';
+import 'package:lpco_llc/features/products/data/models/product_model.dart';
+import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
+import 'package:lpco_llc/core/storage/storage_service.dart';
+import 'package:lpco_llc/features/products/presentation/screens/brands_screen.dart';
+import 'package:lpco_llc/features/products/presentation/screens/catalog_products_screen.dart';
+import 'package:lpco_llc/features/products/presentation/screens/categories_screen.dart';
+import 'package:lpco_llc/features/products/presentation/screens/product_details_screen.dart';
+import 'package:lpco_llc/features/products/presentation/screens/saved_products_screen.dart';
+import 'package:lpco_llc/features/products/presentation/screens/scanner_screen.dart';
+
+class AppRouter {
+  static final GlobalKey<NavigatorState> rootNavigatorKey =
+      GlobalKey<NavigatorState>();
+
+  static final GlobalKey<NavigatorState> homeBranchNavigatorKey =
+      GlobalKey<NavigatorState>();
+  static final GlobalKey<NavigatorState> catalogBranchNavigatorKey =
+      GlobalKey<NavigatorState>();
+  static final GlobalKey<NavigatorState> brandsBranchNavigatorKey =
+      GlobalKey<NavigatorState>();
+  static final GlobalKey<NavigatorState> favoritesBranchNavigatorKey =
+      GlobalKey<NavigatorState>();
+  static final GlobalKey<NavigatorState> cartBranchNavigatorKey =
+      GlobalKey<NavigatorState>();
+  static final GlobalKey<NavigatorState> profileBranchNavigatorKey =
+      GlobalKey<NavigatorState>();
+
+  static Map<String, String> _safeQueryParameters(Uri uri) {
+    try {
+      return uri.queryParameters;
+    } on ArgumentError {
+      return const <String, String>{};
+    } on FormatException {
+      return const <String, String>{};
+    }
+  }
+
+  static Widget _catalogBuilder(BuildContext context, GoRouterState state) {
+    final qp = _safeQueryParameters(state.uri);
+    final type = qp['type'] ?? '';
+    final title = qp['title'] ?? 'المنتجات';
+    final isSearchEntry = qp['focus'] == '1' && type.isEmpty;
+    final initialSearch = qp['search'] ?? '';
+
+    if (type == 'category') {
+      return CatalogProductsScreen(
+        title: title,
+        categoryId: int.tryParse(qp['id'] ?? ''),
+      );
+    }
+
+    if (type == 'brand') {
+      final rawSlug = qp['slug'];
+      return CatalogProductsScreen(
+        title: title,
+        brandSlug: (rawSlug == null || rawSlug.isEmpty) ? null : rawSlug,
+      );
+    }
+
+    return CatalogProductsScreen(
+      title: title,
+      initialSearch: initialSearch,
+      requireExplicitSearch: isSearchEntry,
+      autoFocusSearch: isSearchEntry,
+    );
+  }
+
+  static bool _isAdminUser(AuthCubit authCubit) {
+    final user = authCubit.currentUser;
+    if (user == null || user.isGuest) {
+      return false;
+    }
+
+    final roles = user.roles.map((e) => e.toLowerCase()).toSet();
+    if (roles.contains('administrator') ||
+        roles.contains('shop_manager') ||
+        roles.contains('editor')) {
+      return true;
+    }
+
+    final group = user.group.toLowerCase();
+    return group.contains('admin') || group.contains('manager');
+  }
+
+  static bool _hasAuthenticatedSession(AuthState auth) {
+    return auth is Authenticated ||
+        auth is AuthLocked ||
+        auth is AuthSecuritySetupRequired;
+  }
+
+  static final GoRouter router = GoRouter(
+    navigatorKey: rootNavigatorKey,
+    initialLocation: AppRoutePaths.home,
+    redirect: (context, state) {
+      final uri = state.uri;
+      final isCatalogPath = uri.path == AppRoutePaths.catalog ||
+          uri.path == AppRoutePaths.categoriesCatalog ||
+          uri.path == AppRoutePaths.brandsCatalog;
+
+      if (isCatalogPath && uri.queryParameters['focus'] == '1') {
+        final entry = uri.queryParameters['entry'];
+        final explicitEntry =
+            entry == 'nav' || entry == 'shortcut' || entry == 'home';
+        if (!explicitEntry) {
+          return AppRoutePaths.home;
+        }
+      }
+      return null;
+    },
+    routes: [
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) =>
+            MainShellScreen(navigationShell: navigationShell),
+        branches: [
+          StatefulShellBranch(
+            navigatorKey: homeBranchNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutePaths.home,
+                builder: (context, state) => const HomeScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'product',
+                    builder: (context, state) {
+                      final product = state.extra;
+                      if (product is ProductModel) {
+                        return ProductDetailsScreen(product: product);
+                      }
+                      return const _MissingProductScreen();
+                    },
+                  ),
+                  GoRoute(
+                    path: 'product-by-id/:id',
+                    builder: (context, state) {
+                      final id = int.tryParse(state.pathParameters['id'] ?? '');
+                      if (id == null) {
+                        return const _MissingProductScreen();
+                      }
+                      return _ProductByIdScreen(productId: id);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: catalogBranchNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutePaths.categories,
+                builder: (context, state) => const CategoriesScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.categoriesCatalog,
+                builder: _catalogBuilder,
+              ),
+              GoRoute(path: AppRoutePaths.catalog, builder: _catalogBuilder),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: brandsBranchNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutePaths.brands,
+                builder: (context, state) => const BrandsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.brandsCatalog,
+                builder: _catalogBuilder,
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: favoritesBranchNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutePaths.saved,
+                builder: (context, state) => const SavedProductsScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: cartBranchNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutePaths.cart,
+                builder: (context, state) => const CartScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: profileBranchNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutePaths.account,
+                builder: (context, state) => const AccountScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.orders,
+                builder: (context, state) => const OrdersScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'details',
+                    builder: (context, state) {
+                      final extra = state.extra;
+                      if (extra is! OrderModel) {
+                        return const _MissingOrderDetailsScreen();
+                      }
+                      return OrderDetailsScreen(order: extra);
+                    },
+                  ),
+                ],
+              ),
+              GoRoute(
+                path: AppRoutePaths.notifications,
+                redirect: (context, _) {
+                  final auth = context.read<AuthCubit>().state;
+                  if (_hasAuthenticatedSession(auth)) return null;
+                  return AppRoutePaths.loginRedirect(
+                    AppRoutePaths.notifications,
+                  );
+                },
+                builder: (context, state) => const NotificationsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.jobs,
+                builder: (context, state) => const JobsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.contact,
+                builder: (context, state) => const ContactScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.security,
+                redirect: (context, _) {
+                  final auth = context.read<AuthCubit>().state;
+                  if (auth is Authenticated) return null;
+                  return AppRoutePaths.loginRedirect(AppRoutePaths.security);
+                },
+                builder: (context, state) => const SecuritySettingsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.editProfile,
+                builder: (context, state) => const EditProfileScreen(),
+              ),
+            ],
+          ),
+        ],
+      ),
+      GoRoute(
+        path: AppRoutePaths.admin,
+        parentNavigatorKey: rootNavigatorKey,
+        redirect: (context, state) {
+          final authCubit = context.read<AuthCubit>();
+          final auth = authCubit.state;
+          if (!_hasAuthenticatedSession(auth)) {
+            return AppRoutePaths.loginRedirect(AppRoutePaths.admin);
+          }
+          if (!_isAdminUser(authCubit)) {
+            return AppRoutePaths.account;
+          }
+          return null;
+        },
+        builder: (context, state) => const AdminDashboardScreen(),
+        routes: [
+          GoRoute(
+            path: 'module/:moduleId',
+            builder: (context, state) => AdminModuleScreen(
+              moduleId: state.pathParameters['moduleId'] ?? '',
+            ),
+          ),
+          GoRoute(
+            path: 'order/:id',
+            builder: (context, state) {
+              final orderId = int.tryParse(state.pathParameters['id'] ?? '');
+              if (orderId == null || orderId <= 0) {
+                return const _MissingAdminOrderScreen();
+              }
+              return AdminOrderDetailsScreen(orderId: orderId);
+            },
+          ),
+        ],
+      ),
+      GoRoute(
+        path: AppRoutePaths.scanner,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) {
+          final qp = _safeQueryParameters(state.uri);
+          return ScannerScreen(returnScannedCode: qp['mode'] == 'search');
+        },
+      ),
+      GoRoute(
+        path: AppRoutePaths.login,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) =>
+            LoginScreen(redirect: state.uri.queryParameters['redirect']),
+      ),
+      GoRoute(
+        path: AppRoutePaths.register,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: AppRoutePaths.checkout,
+        parentNavigatorKey: rootNavigatorKey,
+        redirect: (context, _) {
+          final auth = context.read<AuthCubit>().state;
+          if (_hasAuthenticatedSession(auth)) return null;
+          return AppRoutePaths.loginRedirect(AppRoutePaths.checkout);
+        },
+        builder: (context, state) => const CheckoutScreen(),
+      ),
+    ],
+  );
+}
+
+class _MissingAdminOrderScreen extends StatelessWidget {
+  const _MissingAdminOrderScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('تفاصيل الطلب')),
+      body: const Center(child: Text('تعذر تحديد رقم الطلب')),
+    );
+  }
+}
+
+class _MissingOrderDetailsScreen extends StatelessWidget {
+  const _MissingOrderDetailsScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('تفاصيل الطلب')),
+      body: const Center(child: Text('تعذر تحميل تفاصيل الطلب')),
+    );
+  }
+}
+
+class _MissingProductScreen extends StatelessWidget {
+  const _MissingProductScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('تفاصيل المنتج')),
+      body: const Center(child: Text('تعذر تحميل المنتج')),
+    );
+  }
+}
+
+class _ProductByIdScreen extends StatefulWidget {
+  final int productId;
+
+  const _ProductByIdScreen({required this.productId});
+
+  @override
+  State<_ProductByIdScreen> createState() => _ProductByIdScreenState();
+}
+
+class _ProductByIdScreenState extends State<_ProductByIdScreen> {
+  final ProductRepository _repository = ProductRepository();
+  bool _isGuest = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkGuestStatus();
+  }
+
+  void _checkGuestStatus() async {
+    final storage = StorageService();
+    final user = await storage.getUser();
+    if (mounted) {
+      setState(() {
+        _isGuest = user == null || user.isGuest;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<ProductModel?>(
+      future: _repository.getProductById(widget.productId, guest: _isGuest),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final product = snapshot.data;
+        if (product == null) {
+          return const _MissingProductScreen();
+        }
+
+        return ProductDetailsScreen(product: product);
+      },
+    );
+  }
+}

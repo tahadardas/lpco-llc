@@ -1,0 +1,513 @@
+<?php
+/**
+ * Admin-only REST endpoints
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+add_action('rest_api_init', function () {
+    register_rest_route('dms/v1/admin', '/stats', array(
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'dms_admin_get_stats',
+        'permission_callback' => 'dms_admin_permissions',
+    ));
+
+    register_rest_route('dms/v1/admin', '/orders', array(
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'dms_admin_get_orders',
+        'permission_callback' => 'dms_admin_permissions',
+        'args'                => array(
+            'status'    => array('sanitize_callback' => 'sanitize_text_field'),
+            'date_from' => array('sanitize_callback' => 'sanitize_text_field'),
+            'date_to'   => array('sanitize_callback' => 'sanitize_text_field'),
+            'page'      => array('sanitize_callback' => 'absint', 'default' => 1),
+        ),
+    ));
+
+    register_rest_route('dms/v1/admin', '/users', array(
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'dms_admin_get_users',
+        'permission_callback' => 'dms_admin_permissions',
+        'args'                => array(
+            'search' => array('sanitize_callback' => 'sanitize_text_field'),
+            'page'   => array('sanitize_callback' => 'absint', 'default' => 1),
+        ),
+    ));
+
+    register_rest_route('dms/v1/admin', '/members', array(
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'dms_admin_get_members',
+        'permission_callback' => 'dms_admin_permissions',
+        'args'                => array(
+            'search'    => array('sanitize_callback' => 'sanitize_text_field'),
+            'group'     => array('sanitize_callback' => 'sanitize_text_field'),
+            'currency'  => array('sanitize_callback' => 'sanitize_text_field'),
+            'status'    => array('sanitize_callback' => 'sanitize_text_field'),
+            'page'      => array('sanitize_callback' => 'absint', 'default' => 1),
+            'per_page'  => array('sanitize_callback' => 'absint', 'default' => 25),
+        ),
+    ));
+
+    register_rest_route('dms/v1/admin', '/settings', array(
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => 'dms_admin_save_settings',
+        'permission_callback' => 'dms_admin_permissions',
+    ));
+
+    register_rest_route('dms/v1/admin', '/settings', array(
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'dms_admin_get_settings',
+        'permission_callback' => 'dms_admin_permissions',
+    ));
+
+    register_rest_route('dms/v1/admin', '/diagnostics', array(
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'dms_admin_diagnostics',
+        'permission_callback' => 'dms_admin_permissions',
+    ));
+
+    register_rest_route('dms/v1/admin', '/orders/(?P<id>\d+)', array(
+        'methods'             => WP_REST_Server::READABLE,
+        'callback'            => 'dms_admin_get_order_details',
+        'permission_callback' => 'dms_admin_permissions',
+    ));
+
+    register_rest_route('dms/v1/admin', '/orders/(?P<id>\d+)/status', array(
+        'methods'             => WP_REST_Server::CREATABLE,
+        'callback'            => 'dms_admin_update_order_status',
+        'permission_callback' => 'dms_admin_permissions',
+        'args'                => array(
+            'status' => array(
+                'required' => true,
+                'sanitize_callback' => 'sanitize_text_field',
+            ),
+        ),
+    ));
+});
+
+function dms_admin_permissions() {
+    if (!is_user_logged_in()) {
+        return new WP_Error('rest_forbidden', __('يجب تسجيل الدخول', 'dms-ecom'), array('status' => 401));
+    }
+    if (!current_user_can('manage_options')) {
+        return new WP_Error('rest_forbidden', __('ليس لديك صلاحية للوصول', 'dms-ecom'), array('status' => 403));
+    }
+    return true;
+}
+
+function dms_admin_get_stats(WP_REST_Request $request) {
+    $today = date('Y-m-d');
+    $month_start = date('Y-m-01');
+
+    $today_orders = wc_get_orders(array(
+        'date_created' => $today . '...' . $today,
+        'return' => 'ids',
+        'status' => array_keys(wc_get_order_statuses()),
+    ));
+    $month_orders = wc_get_orders(array(
+        'date_created' => $month_start . '...' . $today,
+        'return' => 'ids',
+        'status' => array_keys(wc_get_order_statuses()),
+    ));
+
+    $revenue_month = 0;
+    foreach ($month_orders as $order_id) {
+        $revenue_month += floatval(wc_get_order($order_id)->get_total());
+    }
+
+    $top_products = array();
+    $query = new WC_Order_Query(array(
+        'limit' => 50,
+        'status' => array_keys(wc_get_order_statuses()),
+        'orderby' => 'date',
+        'order' => 'DESC',
+        'return' => 'objects',
+    ));
+    $orders = $query->get_orders();
+    $count = array();
+    foreach ($orders as $order) {
+        foreach ($order->get_items() as $item) {
+            $pid = $item->get_product_id();
+            $count[$pid] = ($count[$pid] ?? 0) + $item->get_quantity();
+        }
+    }
+    arsort($count);
+    $top_products = array_slice($count, 0, 5, true);
+
+    return new WP_REST_Response(array(
+        'orders_today' => count($today_orders),
+        'orders_month' => count($month_orders),
+        'revenue_month' => $revenue_month,
+        'top_products' => $top_products,
+    ), 200);
+}
+
+function dms_admin_get_orders(WP_REST_Request $request) {
+    $status = $request->get_param('status');
+    $date_from = $request->get_param('date_from');
+    $date_to = $request->get_param('date_to');
+    $page = max(1, intval($request->get_param('page')));
+
+    $args = array(
+        'limit' => 25,
+        'offset' => ($page - 1) * 25,
+        'status' => $status ? array($status) : array_keys(wc_get_order_statuses()),
+        'return' => 'objects',
+        'orderby' => 'date',
+        'order' => 'DESC',
+    );
+    if ($date_from || $date_to) {
+        $args['date_created'] = ($date_from ?: '1970-01-01') . '...' . ($date_to ?: date('Y-m-d'));
+    }
+
+    $orders = wc_get_orders($args);
+    $response = array_map(function ($order) {
+        return array(
+            'id' => $order->get_id(),
+            'number' => $order->get_order_number(),
+            'status' => $order->get_status(),
+            'total' => $order->get_total(),
+            'currency' => $order->get_currency(),
+            'date' => $order->get_date_created()->format('Y-m-d H:i:s'),
+            'customer' => $order->get_formatted_billing_full_name(),
+            'phone' => $order->get_billing_phone(),
+            'customer_id' => (int) $order->get_customer_id(),
+            'invoice_url' => dms_admin_order_invoice_url($order->get_id()),
+        );
+    }, $orders);
+
+    return new WP_REST_Response($response, 200);
+}
+
+function dms_admin_order_invoice_url($order_id) {
+    if (!function_exists('dms_invoice_issue_token') || !function_exists('dms_invoice_get_download_url')) {
+        return '';
+    }
+    $token = dms_invoice_issue_token((int) $order_id, DAY_IN_SECONDS);
+    if (empty($token)) {
+        return '';
+    }
+    return dms_invoice_get_download_url((int) $order_id, $token);
+}
+
+function dms_admin_get_order_details(WP_REST_Request $request) {
+    $order_id = (int) $request['id'];
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        return new WP_Error('order_not_found', __('Order not found', 'dms-ecom'), array('status' => 404));
+    }
+
+    $items = array();
+    foreach ($order->get_items() as $item) {
+        $attrs = array();
+        foreach ($item->get_meta_data() as $meta) {
+            $meta_key = (string) $meta->key;
+            if (strpos($meta_key, 'attribute_') === 0) {
+                $attrs[] = array(
+                    'key' => wc_attribute_label(substr($meta_key, 10)),
+                    'value' => (string) $meta->value,
+                );
+            }
+        }
+
+        $image_url = '';
+        $product = $item->get_product();
+        if ($product) {
+            $image_id = $product->get_image_id();
+            if ($image_id) {
+                $image_url = (string) wp_get_attachment_image_url($image_id, 'thumbnail');
+            }
+        }
+        if ($image_url === '') {
+            $product_id = $item->get_product_id();
+            if ($product_id) {
+                $thumb = get_the_post_thumbnail_url($product_id, 'thumbnail');
+                if ($thumb) {
+                    $image_url = (string) $thumb;
+                }
+            }
+        }
+        if ($image_url === '' && function_exists('wc_placeholder_img_src')) {
+            $image_url = (string) wc_placeholder_img_src('thumbnail');
+        }
+
+        $items[] = array(
+            'id' => $item->get_id(),
+            'product_id' => $item->get_product_id(),
+            'variation_id' => $item->get_variation_id(),
+            'name' => $item->get_name(),
+            'quantity' => (int) $item->get_quantity(),
+            'subtotal' => (float) $item->get_subtotal(),
+            'total' => (float) $item->get_total(),
+            'attributes' => $attrs,
+            'unit_name' => (string) ($item->get_meta('unit_name') ?: $item->get_meta('dms_unit_name')),
+            'unit_type' => (string) ($item->get_meta('unit_type') ?: $item->get_meta('dms_unit_type')),
+            'unit_pieces' => (string) ($item->get_meta('unit_pieces') ?: $item->get_meta('dms_unit_pieces_count')),
+            'image_url' => $image_url,
+        );
+    }
+
+    return new WP_REST_Response(array(
+        'id' => $order->get_id(),
+        'number' => $order->get_order_number(),
+        'status' => $order->get_status(),
+        'status_label' => wc_get_order_status_name($order->get_status()),
+        'currency' => $order->get_currency(),
+        'date_created' => $order->get_date_created() ? $order->get_date_created()->format('Y-m-d H:i:s') : '',
+        'payment_method' => $order->get_payment_method_title(),
+        'customer_id' => (int) $order->get_customer_id(),
+        'customer' => array(
+            'name' => $order->get_formatted_billing_full_name(),
+            'email' => $order->get_billing_email(),
+            'phone' => $order->get_billing_phone(),
+            'company' => $order->get_billing_company(),
+            'address' => trim($order->get_billing_address_1() . ' ' . $order->get_billing_address_2()),
+            'city' => $order->get_billing_city(),
+            'state' => $order->get_billing_state(),
+            'country' => $order->get_billing_country(),
+        ),
+        'totals' => array(
+            'subtotal' => (float) $order->get_subtotal(),
+            'shipping_total' => (float) $order->get_shipping_total(),
+            'tax_total' => (float) $order->get_total_tax(),
+            'discount_total' => (float) $order->get_discount_total(),
+            'total' => (float) $order->get_total(),
+        ),
+        'items' => $items,
+        'invoice_url' => dms_admin_order_invoice_url($order->get_id()),
+    ), 200);
+}
+
+function dms_admin_update_order_status(WP_REST_Request $request) {
+    $order_id = (int) $request['id'];
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        return new WP_Error('order_not_found', __('Order not found', 'dms-ecom'), array('status' => 404));
+    }
+
+    $body = $request->get_json_params();
+    $status = sanitize_text_field((string) ($body['status'] ?? $request->get_param('status') ?? ''));
+    $status = str_replace('wc-', '', strtolower($status));
+    if (empty($status)) {
+        return new WP_Error('invalid_status', __('Status is required', 'dms-ecom'), array('status' => 400));
+    }
+
+    $valid = array_map(function ($value) {
+        return str_replace('wc-', '', $value);
+    }, array_keys(wc_get_order_statuses()));
+    if (!in_array($status, $valid, true)) {
+        return new WP_Error('invalid_status', __('Invalid order status', 'dms-ecom'), array('status' => 400));
+    }
+
+    $order->set_status($status);
+    $order->save();
+
+    return new WP_REST_Response(array(
+        'success' => true,
+        'id' => $order->get_id(),
+        'status' => $order->get_status(),
+        'status_label' => wc_get_order_status_name($order->get_status()),
+    ), 200);
+}
+
+function dms_admin_get_users(WP_REST_Request $request) {
+    $search = $request->get_param('search');
+    $page = max(1, intval($request->get_param('page')));
+    $args = array(
+        'number' => 25,
+        'offset' => ($page - 1) * 25,
+        'search' => $search ? '*' . esc_attr($search) . '*' : '',
+        'search_columns' => array('user_login', 'user_email'),
+        'role__in' => array('administrator', 'shop_manager', 'customer'),
+    );
+    $users = get_users($args);
+    $data = array_map(function ($user) {
+        return array(
+            'id' => $user->ID,
+            'username' => $user->user_login,
+            'email' => $user->user_email,
+            'roles' => $user->roles,
+        );
+    }, $users);
+    return new WP_REST_Response($data, 200);
+}
+
+function dms_admin_get_members(WP_REST_Request $request) {
+    $search = sanitize_text_field((string) $request->get_param('search'));
+    $group = sanitize_text_field((string) $request->get_param('group'));
+    $currency = strtolower(sanitize_text_field((string) $request->get_param('currency')));
+    $status = sanitize_text_field((string) $request->get_param('status'));
+
+    $page = max(1, intval($request->get_param('page')));
+    $per_page = intval($request->get_param('per_page'));
+    if ($per_page <= 0) {
+        $per_page = 25;
+    }
+    $per_page = min(100, $per_page);
+
+    $meta_query = array('relation' => 'AND');
+    if ($group !== '') {
+        $meta_query[] = array(
+            'key' => 'dms_user_group',
+            'value' => $group,
+            'compare' => '=',
+        );
+    }
+    if ($currency !== '') {
+        $meta_query[] = array(
+            'key' => 'dms_user_currency',
+            'value' => $currency,
+            'compare' => '=',
+        );
+    }
+    if ($status !== '') {
+        $meta_query[] = array(
+            'key' => 'dms_account_status',
+            'value' => $status,
+            'compare' => '=',
+        );
+    }
+
+    $args = array(
+        'number' => $per_page,
+        'offset' => ($page - 1) * $per_page,
+        'orderby' => 'ID',
+        'order' => 'DESC',
+        'role__in' => array('customer'),
+    );
+
+    if ($search !== '') {
+        $args['search'] = '*' . $search . '*';
+        $args['search_columns'] = array('user_login', 'user_email', 'display_name');
+    }
+
+    if (count($meta_query) > 1) {
+        $args['meta_query'] = $meta_query;
+    }
+
+    $users = get_users($args);
+    $default_status = function_exists('dms_get_default_account_status')
+        ? dms_get_default_account_status()
+        : 'جديد';
+
+    $data = array_map(function ($user) use ($default_status) {
+        $full_name = trim($user->first_name . ' ' . $user->last_name);
+        if ($full_name === '') {
+            $full_name = trim((string) $user->display_name);
+        }
+        if ($full_name === '') {
+            $full_name = (string) $user->user_login;
+        }
+
+        $company = (string) get_user_meta($user->ID, 'account_company_name', true);
+        if ($company === '') {
+            $company = (string) get_user_meta($user->ID, 'billing_company', true);
+        }
+
+        $phone = (string) get_user_meta($user->ID, 'account_whatsapp', true);
+        if ($phone === '') {
+            $phone = (string) get_user_meta($user->ID, 'billing_phone', true);
+        }
+
+        $governorate = (string) get_user_meta($user->ID, 'account_governorate', true);
+        if ($governorate === '') {
+            $governorate = (string) get_user_meta($user->ID, 'billing_state', true);
+        }
+
+        $address = (string) get_user_meta($user->ID, 'billing_address_1', true);
+        if ($address === '') {
+            $address = (string) get_user_meta($user->ID, 'address', true);
+        }
+
+        $group = (string) get_user_meta($user->ID, 'dms_user_group', true);
+        if ($group === '') {
+            $group = 'default';
+        }
+
+        $currency = strtolower((string) get_user_meta($user->ID, 'dms_user_currency', true));
+        if ($currency === '') {
+            $currency = 'syp';
+        }
+
+        $status = (string) get_user_meta($user->ID, 'dms_account_status', true);
+        if ($status === '') {
+            $status = $default_status;
+        }
+
+        return array(
+            'id' => (int) $user->ID,
+            'name' => $full_name,
+            'username' => (string) $user->user_login,
+            'email' => (string) $user->user_email,
+            'company' => $company,
+            'phone' => $phone,
+            'governorate' => $governorate,
+            'address' => $address,
+            'group' => $group,
+            'currency' => $currency,
+            'account_status' => $status,
+            'roles' => $user->roles,
+        );
+    }, $users);
+
+    return new WP_REST_Response($data, 200);
+}
+
+function dms_admin_save_settings(WP_REST_Request $request) {
+    $body = $request->get_json_params();
+    $current = dms_app_get_settings();
+
+    $fields = array(
+        'exchange_rate_usd_syp' => 'float',
+        'default_currency' => 'text',
+        'allow_guest_checkout' => 'bool',
+        'enable_debug_logs' => 'bool',
+        'cors_allowed_origins' => 'array',
+        'turnstile_site_key' => 'text',
+        'turnstile_secret_key' => 'text',
+        'recaptcha_site_key' => 'text',
+        'recaptcha_secret_key' => 'text',
+    );
+
+    foreach ($fields as $key => $type) {
+        if (!isset($body[$key])) {
+            continue;
+        }
+        switch ($type) {
+            case 'float':
+                $current[$key] = floatval($body[$key]);
+                break;
+            case 'bool':
+                $current[$key] = (bool) $body[$key];
+                break;
+            case 'array':
+                if (is_array($body[$key])) {
+                    $current[$key] = array_filter(array_map('sanitize_text_field', $body[$key]));
+                }
+                break;
+            default:
+                $current[$key] = sanitize_text_field($body[$key]);
+        }
+    }
+
+    update_option('dms_app_settings', $current, false);
+    return new WP_REST_Response(array('success' => true, 'settings' => $current), 200);
+}
+
+function dms_admin_get_settings(WP_REST_Request $request) {
+    return new WP_REST_Response(dms_app_get_settings(), 200);
+}
+
+function dms_admin_diagnostics() {
+    $settings = dms_app_get_settings();
+    $diag = array(
+        'jwt_defined' => defined('JWT_AUTH_SECRET_KEY'),
+        'cors_enabled' => defined('JWT_AUTH_CORS_ENABLE') ? JWT_AUTH_CORS_ENABLE : false,
+        'debug_logs' => !empty($settings['enable_debug_logs']),
+        'php_version' => PHP_VERSION,
+        'wp_version' => get_bloginfo('version'),
+    );
+    return new WP_REST_Response($diag, 200);
+}

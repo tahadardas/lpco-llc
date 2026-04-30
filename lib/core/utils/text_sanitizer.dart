@@ -1,0 +1,388 @@
+import 'dart:convert';
+
+class TextSanitizer {
+  TextSanitizer._();
+
+  static String fix(dynamic value) {
+    var text = (value ?? '').toString();
+    if (text.isEmpty) return '';
+
+    text = text.trim();
+    if (text.isEmpty) return '';
+
+    text = _decodePercentEncoded(text);
+    text = _stripHtml(text);
+
+    final latinFixed = _repairLatin1Utf8(text);
+    if (_isBetter(current: text, candidate: latinFixed)) {
+      text = latinFixed;
+    }
+
+    final cp1256Fixed = _repairCp1256Utf8(text);
+    if (_isBetter(current: text, candidate: cp1256Fixed)) {
+      text = cp1256Fixed;
+    }
+
+    return text;
+  }
+
+  static String _stripHtml(String input) {
+    if (!input.contains('<')) return input;
+    return input
+        .replaceAll(RegExp(r'<[^>]*>|&nbsp;'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  static String _decodePercentEncoded(String input) {
+    if (!input.contains('%')) return input;
+    try {
+      return Uri.decodeFull(input);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  static String _repairLatin1Utf8(String input) {
+    if (!_latinMojibakePattern.hasMatch(input)) {
+      return input;
+    }
+
+    try {
+      return utf8.decode(latin1.encode(input), allowMalformed: true);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  static String _repairCp1256Utf8(String input) {
+    if (!_looksLikeCp1256Mojibake(input)) {
+      return input;
+    }
+
+    final bytes = <int>[];
+    for (final rune in input.runes) {
+      if (rune <= 0x7F) {
+        bytes.add(rune);
+        continue;
+      }
+
+      final mapped = _cp1256Reverse[rune];
+      if (mapped == null) {
+        return input;
+      }
+      bytes.add(mapped);
+    }
+
+    try {
+      return utf8.decode(bytes, allowMalformed: true);
+    } catch (_) {
+      return input;
+    }
+  }
+
+  static bool _looksLikeCp1256Mojibake(String input) {
+    var firstByteMarkers = 0;
+    var oddMarkers = 0;
+
+    for (final rune in input.runes) {
+      if (rune == 0x0637 ||
+          rune == 0x0638 ||
+          rune == 0x0639 ||
+          rune == 0x063A) {
+        firstByteMarkers++;
+      }
+      if (_cp1256MarkerRunes.contains(rune)) {
+        oddMarkers++;
+      }
+    }
+
+    final length = input.runes.length;
+    if (length < 4) return false;
+
+    if (oddMarkers >= 2 && firstByteMarkers >= 1) {
+      return true;
+    }
+
+    return firstByteMarkers * 3 >= length;
+  }
+
+  static bool _isBetter({required String current, required String candidate}) {
+    if (candidate.isEmpty || candidate == current) {
+      return false;
+    }
+
+    return _score(candidate) > _score(current);
+  }
+
+  static int _score(String value) {
+    var arabic = 0;
+    var latinMojibake = 0;
+    var cp1256Mojibake = 0;
+    var replacement = 0;
+
+    for (final rune in value.runes) {
+      if (rune >= 0x0600 && rune <= 0x06FF) {
+        arabic++;
+      }
+      if (_latinMojibakeRunes.contains(rune)) {
+        latinMojibake++;
+      }
+      if (_cp1256MarkerRunes.contains(rune)) {
+        cp1256Mojibake++;
+      }
+      if (rune == 0xFFFD) {
+        replacement++;
+      }
+    }
+
+    return (arabic * 3) -
+        (latinMojibake * 4) -
+        (cp1256Mojibake * 3) -
+        (replacement * 8);
+  }
+
+  static final RegExp _latinMojibakePattern = RegExp(
+    r'[\u00C0-\u00FF\u0152\u0153\u0160\u0161\u0178\u017D\u017E]',
+  );
+
+  static const Set<int> _latinMojibakeRunes = <int>{
+    0x00C0,
+    0x00C1,
+    0x00C2,
+    0x00C3,
+    0x00C4,
+    0x00C5,
+    0x00C6,
+    0x00C7,
+    0x00C8,
+    0x00C9,
+    0x00CA,
+    0x00CB,
+    0x00CC,
+    0x00CD,
+    0x00CE,
+    0x00CF,
+    0x00D0,
+    0x00D1,
+    0x00D2,
+    0x00D3,
+    0x00D4,
+    0x00D5,
+    0x00D6,
+    0x00D8,
+    0x00D9,
+    0x00DA,
+    0x00DB,
+    0x00DC,
+    0x00DD,
+    0x00DE,
+    0x00DF,
+    0x00E0,
+    0x00E1,
+    0x00E2,
+    0x00E3,
+    0x00E4,
+    0x00E5,
+    0x00E6,
+    0x00E7,
+    0x00E8,
+    0x00E9,
+    0x00EA,
+    0x00EB,
+    0x00EC,
+    0x00ED,
+    0x00EE,
+    0x00EF,
+    0x00F0,
+    0x00F1,
+    0x00F2,
+    0x00F3,
+    0x00F4,
+    0x00F5,
+    0x00F6,
+    0x00F8,
+    0x00F9,
+    0x00FA,
+    0x00FB,
+    0x00FC,
+    0x00FD,
+    0x00FE,
+    0x00FF,
+    0x0152,
+    0x0153,
+    0x0160,
+    0x0161,
+    0x0178,
+    0x017D,
+    0x017E,
+  };
+
+  static const Set<int> _cp1256MarkerRunes = <int>{
+    0x00A7,
+    0x00B1,
+    0x00B5,
+    0x00A9,
+    0x201E,
+    0x2026,
+    0x2020,
+    0x2021,
+    0x02C6,
+    0x2030,
+    0x2018,
+    0x2019,
+    0x201C,
+    0x201D,
+    0x2022,
+    0x2013,
+    0x2014,
+    0x2122,
+    0x2039,
+    0x203A,
+    0x0152,
+    0x0153,
+    0x0679,
+    0x067E,
+    0x0686,
+    0x0688,
+    0x0691,
+    0x0698,
+    0x06A9,
+    0x06AF,
+    0x06BA,
+    0x200C,
+    0x200D,
+  };
+
+  // Reverse map: decoded cp1256 rune -> original cp1256 byte.
+  static const Map<int, int> _cp1256Reverse = <int, int>{
+    0x00A0: 0xA0,
+    0x00A2: 0xA2,
+    0x00A3: 0xA3,
+    0x00A4: 0xA4,
+    0x00A5: 0xA5,
+    0x00A6: 0xA6,
+    0x00A7: 0xA7,
+    0x00A8: 0xA8,
+    0x00A9: 0xA9,
+    0x00AB: 0xAB,
+    0x00AC: 0xAC,
+    0x00AD: 0xAD,
+    0x00AE: 0xAE,
+    0x00AF: 0xAF,
+    0x00B0: 0xB0,
+    0x00B1: 0xB1,
+    0x00B2: 0xB2,
+    0x00B3: 0xB3,
+    0x00B4: 0xB4,
+    0x00B5: 0xB5,
+    0x00B6: 0xB6,
+    0x00B7: 0xB7,
+    0x00B8: 0xB8,
+    0x00B9: 0xB9,
+    0x00BB: 0xBB,
+    0x00BC: 0xBC,
+    0x00BD: 0xBD,
+    0x00BE: 0xBE,
+    0x00D7: 0xD7,
+    0x00E0: 0xE0,
+    0x00E2: 0xE2,
+    0x00E7: 0xE7,
+    0x00E8: 0xE8,
+    0x00E9: 0xE9,
+    0x00EA: 0xEA,
+    0x00EB: 0xEB,
+    0x00EE: 0xEE,
+    0x00EF: 0xEF,
+    0x00F4: 0xF4,
+    0x00F7: 0xF7,
+    0x00F9: 0xF9,
+    0x00FB: 0xFB,
+    0x00FC: 0xFC,
+    0x0152: 0x8C,
+    0x0153: 0x9C,
+    0x0192: 0x83,
+    0x02C6: 0x88,
+    0x060C: 0xA1,
+    0x061B: 0xBA,
+    0x061F: 0xBF,
+    0x0621: 0xC1,
+    0x0622: 0xC2,
+    0x0623: 0xC3,
+    0x0624: 0xC4,
+    0x0625: 0xC5,
+    0x0626: 0xC6,
+    0x0627: 0xC7,
+    0x0628: 0xC8,
+    0x0629: 0xC9,
+    0x062A: 0xCA,
+    0x062B: 0xCB,
+    0x062C: 0xCC,
+    0x062D: 0xCD,
+    0x062E: 0xCE,
+    0x062F: 0xCF,
+    0x0630: 0xD0,
+    0x0631: 0xD1,
+    0x0632: 0xD2,
+    0x0633: 0xD3,
+    0x0634: 0xD4,
+    0x0635: 0xD5,
+    0x0636: 0xD6,
+    0x0637: 0xD8,
+    0x0638: 0xD9,
+    0x0639: 0xDA,
+    0x063A: 0xDB,
+    0x0640: 0xDC,
+    0x0641: 0xDD,
+    0x0642: 0xDE,
+    0x0643: 0xDF,
+    0x0644: 0xE1,
+    0x0645: 0xE3,
+    0x0646: 0xE4,
+    0x0647: 0xE5,
+    0x0648: 0xE6,
+    0x0649: 0xEC,
+    0x064A: 0xED,
+    0x064B: 0xF0,
+    0x064C: 0xF1,
+    0x064D: 0xF2,
+    0x064E: 0xF3,
+    0x064F: 0xF5,
+    0x0650: 0xF6,
+    0x0651: 0xF8,
+    0x0652: 0xFA,
+    0x0679: 0x8A,
+    0x067E: 0x81,
+    0x0686: 0x8D,
+    0x0688: 0x8F,
+    0x0691: 0x9A,
+    0x0698: 0x8E,
+    0x06A9: 0x98,
+    0x06AF: 0x90,
+    0x06BA: 0x9F,
+    0x06BE: 0xAA,
+    0x06C1: 0xC0,
+    0x06D2: 0xFF,
+    0x200C: 0x9D,
+    0x200D: 0x9E,
+    0x200E: 0xFD,
+    0x200F: 0xFE,
+    0x2013: 0x96,
+    0x2014: 0x97,
+    0x2018: 0x91,
+    0x2019: 0x92,
+    0x201A: 0x82,
+    0x201C: 0x93,
+    0x201D: 0x94,
+    0x201E: 0x84,
+    0x2020: 0x86,
+    0x2021: 0x87,
+    0x2022: 0x95,
+    0x2026: 0x85,
+    0x2030: 0x89,
+    0x2039: 0x8B,
+    0x203A: 0x9B,
+    0x20AC: 0x80,
+    0x2122: 0x99,
+  };
+}

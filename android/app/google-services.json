@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "434792367249",
+    "project_id": "lpco-llc-730ab",
+    "storage_bucket": "lpco-llc-730ab.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:434792367249:android:00a1c8b24f31b594a16b30",
+        "android_client_info": {
+          "package_name": "com.lpco.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGK2FbQrQ94orzJZgsoNq2rhvICmaEWv4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

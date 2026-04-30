@@ -1,0 +1,575 @@
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'package:lpco_llc/app/router/app_routes.dart';
+import 'package:lpco_llc/core/navigation/app_back_scope.dart';
+import 'package:lpco_llc/core/network/api_contract.dart';
+import 'package:lpco_llc/core/utils/formatters.dart';
+import 'package:lpco_llc/core/widgets/brand_app_bar.dart';
+import 'package:lpco_llc/core/widgets/glass.dart';
+import 'package:lpco_llc/features/admin/data/models/admin_order_details_model.dart';
+import 'package:lpco_llc/features/admin/data/repositories/admin_repository.dart';
+import 'package:lpco_llc/features/admin/data/services/admin_invoice_pdf_service.dart';
+import 'package:lpco_llc/shared/commerce/product_identity/product_identity_formatter.dart';
+
+class AdminOrderDetailsScreen extends StatefulWidget {
+  final int orderId;
+
+  const AdminOrderDetailsScreen({super.key, required this.orderId});
+
+  @override
+  State<AdminOrderDetailsScreen> createState() =>
+      _AdminOrderDetailsScreenState();
+}
+
+class _AdminOrderDetailsScreenState extends State<AdminOrderDetailsScreen> {
+  final AdminRepository _repository = AdminRepository();
+  final AdminInvoicePdfService _pdfService = AdminInvoicePdfService();
+
+  late Future<AdminOrderDetailsModel> _future;
+  bool _statusUpdating = false;
+  bool _pdfBusy = false;
+
+  static const List<String> _statuses = <String>[
+    'pending',
+    'processing',
+    'on-hold',
+    'completed',
+    'cancelled',
+    'refunded',
+    'failed',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _repository.fetchOrderDetails(widget.orderId);
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _future = _repository.fetchOrderDetails(widget.orderId);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBackScope(
+      fallbackLocation: AppRoutePaths.admin,
+      child: Scaffold(
+        extendBody: true,
+        extendBodyBehindAppBar: true,
+        appBar: BrandAppBar(
+          title: 'تفاصيل الطلب #${widget.orderId}',
+          showBack: true,
+        ),
+        body: FutureBuilder<AdminOrderDetailsModel>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            if (snapshot.hasError || !snapshot.hasData) {
+              return Center(
+                child: Text(
+                  'فشل تحميل تفاصيل الطلب',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              );
+            }
+
+            final order = snapshot.data!;
+            return RefreshIndicator(
+              onRefresh: _reload,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 90, 16, 20),
+                children: <Widget>[
+                  _buildHeader(order),
+                  const SizedBox(height: 12),
+                  _buildCustomer(order),
+                  const SizedBox(height: 12),
+                  _buildCommunication(order),
+                  const SizedBox(height: 12),
+                  _buildItems(order),
+                  const SizedBox(height: 12),
+                  _buildTotals(order),
+                  const SizedBox(height: 12),
+                  _buildInvoiceActions(order),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(AdminOrderDetailsModel order) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: GlassStyle.acrylicDecoration(radius: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'طلب #${order.number}',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: GlassStyle.fireRed.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  order.statusLabel.isEmpty ? order.status : order.statusLabel,
+                  style: const TextStyle(
+                    color: GlassStyle.fireRed,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('التاريخ: ${order.dateCreated}'),
+          if (order.paymentMethod.isNotEmpty)
+            Text('طريقة الدفع: ${order.paymentMethod}'),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            initialValue: order.status,
+            items: _statuses
+                .map(
+                  (status) => DropdownMenuItem<String>(
+                    value: status,
+                    child: Text(status),
+                  ),
+                )
+                .toList(),
+            onChanged: _statusUpdating
+                ? null
+                : (status) async {
+                    if (status == null || status == order.status) return;
+
+                    setState(() => _statusUpdating = true);
+                    try {
+                      await _repository.updateOrderStatus(
+                        orderId: order.id,
+                        status: status,
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('تم تحديث حالة الطلب')),
+                        );
+                      }
+                      await _reload();
+                    } catch (e) {
+                      if (mounted) {
+                        final safeMessage = ApiContract.safeMessageFromException(
+                          e,
+                          fallback:
+                              'تعذر تحديث حالة الطلب حالياً. يرجى إعادة المحاولة.',
+                        );
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text(safeMessage)));
+                      }
+                    } finally {
+                      if (mounted) {
+                        setState(() => _statusUpdating = false);
+                      }
+                    }
+                  },
+            decoration: const InputDecoration(labelText: 'تحديث حالة الطلب'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomer(AdminOrderDetailsModel order) {
+    final customer = order.customer;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: GlassStyle.acrylicDecoration(radius: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'بيانات العميل',
+            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+          const SizedBox(height: 8),
+          Text('الاسم: ${customer.name}'),
+          if (customer.company.isNotEmpty) Text('المنشأة: ${customer.company}'),
+          if (customer.email.isNotEmpty) Text('البريد: ${customer.email}'),
+          if (customer.phone.isNotEmpty) Text('الهاتف: ${customer.phone}'),
+          Text(
+            'العنوان: ${customer.address} ${customer.city} ${customer.state} ${customer.country}',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCommunication(AdminOrderDetailsModel order) {
+    final phone = order.customer.phone.trim();
+    final waPhone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    final message = Uri.encodeComponent(
+      'مرحباً ${order.customer.name}، بخصوص طلبك رقم ${order.number}.',
+    );
+
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: FilledButton.icon(
+            onPressed: waPhone.isEmpty
+                ? null
+                : () async {
+                    final uri = Uri.parse(
+                      'https://wa.me/$waPhone?text=$message',
+                    );
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  },
+            icon: const Icon(Icons.chat),
+            label: const Text('مراسلة واتساب'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: phone.isEmpty
+                ? null
+                : () async {
+                    final uri = Uri.parse('tel:$phone');
+                    await launchUrl(uri);
+                  },
+            icon: const Icon(Icons.call),
+            label: const Text('اتصال'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildItems(AdminOrderDetailsModel order) {
+    final grouped = <String, List<AdminOrderItem>>{};
+    final labels = <String, String>{};
+
+    for (var item in order.items) {
+      final code = item.warehouseCode.isEmpty ? 'default' : item.warehouseCode;
+      grouped.putIfAbsent(code, () => []).add(item);
+      if (item.warehouseLabel.isNotEmpty) {
+        labels[code] = item.warehouseLabel;
+      }
+    }
+
+    return Column(
+      children: grouped.entries.map((entry) {
+        final code = entry.key;
+        final items = entry.value;
+        final label =
+            labels[code] ??
+            (code == 'default' ? 'منتجات الطلب' : 'مستودع $code');
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: GlassStyle.acrylicDecoration(radius: 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                    ),
+                  ),
+                  _buildMiniInvoiceActions(order, code, label),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ...items.map((item) {
+                final unitInfo = ProductIdentityFormatter.formatUnitLabel(
+                  unitLabel: item.unitName,
+                  unitType: item.unitType,
+                  piecesCount: int.tryParse(item.unitPieces),
+                );
+
+                final attrs = item.attributes
+                    .map((entry) => '${entry['key']}: ${entry['value']}')
+                    .join(' | ');
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: GlassStyle.acrylicDecoration(radius: 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        item.name,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      if (attrs.isNotEmpty) Text(attrs),
+                      Text('الوحدة: $unitInfo'),
+                      const SizedBox(height: 4),
+                      Text(
+                        'الكمية: ${ProductIdentityFormatter.formatQuantityLabel(quantity: item.quantity, unitLabel: item.unitName, unitType: item.unitType)} | الإجمالي: ${PriceFormatter.format(item.total, currencyCode: order.currency)}',
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildMiniInvoiceActions(
+    AdminOrderDetailsModel order,
+    String code,
+    String label,
+  ) {
+    // If there's only one warehouse and it's the only group, we might not need mini actions
+    // But user asked for invoice for EACH warehouse, so let's provide them.
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          onPressed: _pdfBusy
+              ? null
+              : () => _withPdf(
+                  order,
+                  (bytes) async {
+                    if (!mounted) return;
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => _InvoicePreviewScreen(
+                          order: order,
+                          bytes: bytes,
+                          title: 'معاينة فاتورة - $label',
+                        ),
+                      ),
+                    );
+                  },
+                  warehouseCode: code == 'default' ? '' : code,
+                  warehouseLabel: label,
+                ),
+          icon: const Icon(Icons.picture_as_pdf, size: 20),
+          tooltip: 'فاتورة هذا المستودع',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTotals(AdminOrderDetailsModel order) {
+    final totals = order.totals;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: GlassStyle.acrylicDecoration(radius: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'ملخص المبالغ',
+            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+          const SizedBox(height: 8),
+          _moneyRow(order, 'الإجمالي الفرعي', totals.subtotal),
+          _moneyRow(order, 'الخصم', totals.discountTotal),
+          _moneyRow(order, 'الشحن', totals.shippingTotal),
+          _moneyRow(order, 'الضرائب', totals.taxTotal),
+          const Divider(height: 18),
+          _moneyRow(order, 'الإجمالي النهائي', totals.total, emphasize: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _moneyRow(
+    AdminOrderDetailsModel order,
+    String title,
+    num value, {
+    bool emphasize = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontWeight: emphasize ? FontWeight.w900 : FontWeight.w700,
+                color: emphasize ? GlassStyle.fireRed : null,
+              ),
+            ),
+          ),
+          Text(
+            PriceFormatter.format(value, currencyCode: order.currency),
+            style: TextStyle(
+              fontWeight: emphasize ? FontWeight.w900 : FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInvoiceActions(AdminOrderDetailsModel order) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: GlassStyle.acrylicDecoration(radius: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'الفاتورة',
+            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: _pdfBusy
+                ? null
+                : () => _withPdf(order, (bytes) async {
+                    if (!mounted) return;
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            _InvoicePreviewScreen(order: order, bytes: bytes),
+                      ),
+                    );
+                  }),
+            icon: const Icon(Icons.preview),
+            label: const Text('معاينة الفاتورة'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: _pdfBusy
+                ? null
+                : () => _withPdf(order, (bytes) async {
+                    final file = await _pdfService.saveToDevice(
+                      order: order,
+                      bytes: bytes,
+                    );
+                    if (!mounted) return;
+                    final msg = file == null
+                        ? 'تم تشغيل الحفظ/المشاركة حسب نظام التشغيل'
+                        : 'تم الحفظ في: ${file.path}';
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(msg)));
+                  }),
+            icon: const Icon(Icons.download),
+            label: const Text('حفظ في الجهاز'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: _pdfBusy
+                ? null
+                : () => _withPdf(order, (bytes) async {
+                    await _pdfService.share(order: order, bytes: bytes);
+                  }),
+            icon: const Icon(Icons.share),
+            label: const Text('مشاركة الفاتورة'),
+          ),
+          if (order.invoiceUrl.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () async {
+                final uri = Uri.tryParse(order.invoiceUrl);
+                if (uri == null) return;
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              },
+              icon: const Icon(Icons.link),
+              label: const Text('فتح رابط الفاتورة من السيرفر'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _withPdf(
+    AdminOrderDetailsModel order,
+    Future<void> Function(Uint8List bytes) action, {
+    String? warehouseCode,
+    String? warehouseLabel,
+  }) async {
+    setState(() => _pdfBusy = true);
+    try {
+      final bytes = await _pdfService.generate(
+        order,
+        warehouseCode: warehouseCode,
+        warehouseLabel: warehouseLabel,
+      );
+      await action(bytes);
+    } catch (e) {
+      if (mounted) {
+        final safeMessage = ApiContract.safeMessageFromException(
+          e,
+          fallback: 'تعذر تجهيز الفاتورة حالياً. يرجى إعادة المحاولة.',
+        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(safeMessage)));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _pdfBusy = false);
+      }
+    }
+  }
+}
+
+class _InvoicePreviewScreen extends StatelessWidget {
+  final AdminOrderDetailsModel order;
+  final Uint8List bytes;
+  final String? title;
+
+  const _InvoicePreviewScreen({
+    required this.order,
+    required this.bytes,
+    this.title,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: BrandAppBar(
+        title: title ?? 'معاينة فاتورة #${order.number}',
+        showBack: true,
+        onBack: () => context.pop(),
+      ),
+      body: PdfPreview(
+        build: (format) async => bytes,
+        allowSharing: true,
+        allowPrinting: true,
+        canDebug: false,
+      ),
+    );
+  }
+}

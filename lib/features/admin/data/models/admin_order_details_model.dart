@@ -1,0 +1,319 @@
+import 'package:lpco_llc/core/utils/text_sanitizer.dart';
+
+class AdminOrderCustomer {
+  final String name;
+  final String email;
+  final String phone;
+  final String company;
+  final String address;
+  final String city;
+  final String state;
+  final String country;
+
+  const AdminOrderCustomer({
+    required this.name,
+    required this.email,
+    required this.phone,
+    required this.company,
+    required this.address,
+    required this.city,
+    required this.state,
+    required this.country,
+  });
+
+  factory AdminOrderCustomer.fromJson(Map<String, dynamic> json) {
+    return AdminOrderCustomer(
+      name: TextSanitizer.fix(json['name']),
+      email: TextSanitizer.fix(json['email']),
+      phone: TextSanitizer.fix(json['phone']),
+      company: TextSanitizer.fix(json['company']),
+      address: TextSanitizer.fix(json['address']),
+      city: TextSanitizer.fix(json['city']),
+      state: TextSanitizer.fix(json['state']),
+      country: TextSanitizer.fix(json['country']),
+    );
+  }
+}
+
+class AdminOrderTotals {
+  final num subtotal;
+  final num shippingTotal;
+  final num taxTotal;
+  final num discountTotal;
+  final num total;
+
+  const AdminOrderTotals({
+    required this.subtotal,
+    required this.shippingTotal,
+    required this.taxTotal,
+    required this.discountTotal,
+    required this.total,
+  });
+
+  factory AdminOrderTotals.fromJson(Map<String, dynamic> json) {
+    num parse(dynamic value) => num.tryParse('$value') ?? 0;
+    return AdminOrderTotals(
+      subtotal: parse(json['subtotal']),
+      shippingTotal: parse(json['shipping_total']),
+      taxTotal: parse(json['tax_total']),
+      discountTotal: parse(json['discount_total']),
+      total: parse(json['total']),
+    );
+  }
+}
+
+class AdminOrderItem {
+  final int id;
+  final int productId;
+  final int variationId;
+  final String name;
+  final int quantity;
+  final num subtotal;
+  final num total;
+  final String unitName;
+  final String unitType;
+  final String unitPieces;
+  final String imageUrl;
+  final String warehouseCode;
+  final String warehouseLabel;
+  final List<Map<String, String>> attributes;
+
+  const AdminOrderItem({
+    required this.id,
+    required this.productId,
+    required this.variationId,
+    required this.name,
+    required this.quantity,
+    required this.subtotal,
+    required this.total,
+    required this.unitName,
+    required this.unitType,
+    required this.unitPieces,
+    required this.imageUrl,
+    this.warehouseCode = '',
+    this.warehouseLabel = '',
+    required this.attributes,
+  });
+
+  factory AdminOrderItem.fromJson(Map<String, dynamic> json) {
+    num parse(dynamic value) => num.tryParse('$value') ?? 0;
+
+    final rawMeta = json['meta_data'] ?? json['meta'];
+    final metaMap = <String, dynamic>{};
+    if (rawMeta is List) {
+      for (final entry in rawMeta.whereType<Map>()) {
+        metaMap[TextSanitizer.fix(entry['key']).toLowerCase()] = entry['value'];
+      }
+    } else if (rawMeta is Map) {
+      for (final entry in rawMeta.entries) {
+        metaMap[TextSanitizer.fix(entry.key).toLowerCase()] = entry.value;
+      }
+    }
+
+    final rawAttributes = (json['attributes'] as List?) ?? const <dynamic>[];
+    final attrs = rawAttributes.whereType<Map>().map((entry) {
+      final map = Map<String, dynamic>.from(entry);
+      return <String, String>{
+        'key': TextSanitizer.fix(map['key'] ?? map['name']),
+        'value': TextSanitizer.fix(map['value'] ?? map['option']),
+      };
+    }).toList();
+
+    // Robust unit parsing
+    final rawUnit = json['unit'];
+    final Map<String, dynamic>? unitMap = rawUnit is Map
+        ? Map<String, dynamic>.from(rawUnit)
+        : null;
+
+    final unitName = TextSanitizer.fix(
+      json['unit_name'] ??
+          json['unit_label'] ??
+          json['unit_display_default_ar'] ??
+          unitMap?['name'] ??
+          unitMap?['unit_name'] ??
+          unitMap?['unit_label'] ??
+          metaMap['unit_name'] ??
+          metaMap['unit_label'] ??
+          metaMap['unit_display_default_ar'] ??
+          metaMap['unit'],
+    );
+
+    final unitType = TextSanitizer.fix(
+      json['unit_type'] ??
+          json['type'] ??
+          unitMap?['type'] ??
+          unitMap?['unit_type'] ??
+          metaMap['unit_type'] ??
+          metaMap['type'] ??
+          metaMap['unit_display_default_ar'],
+    );
+
+    final unitPieces = TextSanitizer.fix(
+      json['unit_pieces'] ??
+          json['pieces'] ??
+          json['pack_size'] ??
+          json['unit_multiplier_pieces'] ??
+          unitMap?['pieces'] ??
+          unitMap?['pieces_count'] ??
+          unitMap?['unit_pieces'] ??
+          unitMap?['unit_multiplier_pieces'] ??
+          metaMap['unit_multiplier_pieces'] ??
+          metaMap['unit_pieces'] ??
+          metaMap['pieces'] ??
+          metaMap['pieces_count'] ??
+          metaMap['pack_size'],
+    );
+
+    final productName = TextSanitizer.fix(
+      json['name'] ?? json['product_name'] ?? metaMap['product_name'] ?? '',
+    );
+
+    final imageUrl = TextSanitizer.fix(
+      json['image_url'] ??
+          json['imageUrl'] ??
+          (json['image'] is String ? json['image'] : null) ??
+          (json['image'] is Map ? (json['image'] as Map)['src'] : null) ??
+          json['product_image'] ??
+          json['thumbnail_url'] ??
+          json['thumbnail'] ??
+          metaMap['product_image'] ??
+          metaMap['image_url'] ??
+          metaMap['thumbnail'] ??
+          '',
+    );
+    final warehouseCode = TextSanitizer.fix(
+      json['warehouse_code'] ??
+          json['dms_warehouse_code'] ??
+          metaMap['warehouse_code'] ??
+          metaMap['dms_warehouse_code'] ??
+          '',
+    );
+    final warehouseLabel = TextSanitizer.fix(
+      json['warehouse_label'] ??
+          json['dms_warehouse_label'] ??
+          metaMap['warehouse_label'] ??
+          metaMap['dms_warehouse_label'] ??
+          '',
+    );
+
+    return AdminOrderItem(
+      id: int.tryParse('${json['id'] ?? 0}') ?? 0,
+      productId: int.tryParse('${json['product_id'] ?? 0}') ?? 0,
+      variationId: int.tryParse('${json['variation_id'] ?? 0}') ?? 0,
+      name: productName,
+      quantity: int.tryParse('${json['quantity'] ?? 0}') ?? 0,
+      subtotal: parse(json['subtotal']),
+      total: parse(json['total']),
+      unitName: unitName,
+      unitType: unitType,
+      unitPieces: unitPieces,
+      imageUrl: imageUrl,
+      warehouseCode: warehouseCode,
+      warehouseLabel: warehouseLabel,
+      attributes: attrs,
+    );
+  }
+}
+
+class AdminOrderDetailsModel {
+  final int id;
+  final String number;
+  final String status;
+  final String statusLabel;
+  final String currency;
+  final String dateCreated;
+  final String paymentMethod;
+  final int customerId;
+  final AdminOrderCustomer customer;
+  final AdminOrderTotals totals;
+  final List<AdminOrderItem> items;
+  final String invoiceUrl;
+  final String warehouseCode;
+  final String warehouseLabel;
+  final List<String> warehouseCodes;
+
+  const AdminOrderDetailsModel({
+    required this.id,
+    required this.number,
+    required this.status,
+    required this.statusLabel,
+    required this.currency,
+    required this.dateCreated,
+    required this.paymentMethod,
+    required this.customerId,
+    required this.customer,
+    required this.totals,
+    required this.items,
+    required this.invoiceUrl,
+    this.warehouseCode = '',
+    this.warehouseLabel = '',
+    this.warehouseCodes = const <String>[],
+  });
+
+  factory AdminOrderDetailsModel.fromJson(Map<String, dynamic> json) {
+    // Attempt to handle cases where the primary order object is nested inside 'order' or 'data'.
+    // While the Repository should handle this, doing it here adds another layer of defense.
+    final source = json.containsKey('order') && json['order'] is Map
+        ? Map<String, dynamic>.from(json['order'])
+        : json.containsKey('data') && json['data'] is Map
+        ? Map<String, dynamic>.from(json['data'])
+        : json;
+
+    final customerRaw = Map<String, dynamic>.from(
+      (source['customer'] as Map?) ?? const <String, dynamic>{},
+    );
+    final totalsRaw = Map<String, dynamic>.from(
+      (source['totals'] as Map?) ?? const <String, dynamic>{},
+    );
+    final rawItems =
+        (source['items'] as List?) ??
+        (source['line_items'] as List?) ??
+        const <dynamic>[];
+    final items = rawItems
+        .whereType<Map>()
+        .map((e) => AdminOrderItem.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+
+    return AdminOrderDetailsModel(
+      id: int.tryParse('${source['id'] ?? 0}') ?? 0,
+      number: TextSanitizer.fix(
+        source['number'] ?? source['order_number'] ?? '${source['id'] ?? ''}',
+      ),
+      status: TextSanitizer.fix(source['status']),
+      statusLabel: TextSanitizer.fix(
+        source['status_label'] ?? source['status'],
+      ),
+      currency: TextSanitizer.fix(source['currency'] ?? 'syp').toLowerCase(),
+      dateCreated: TextSanitizer.fix(
+        source['date_created'] ??
+            source['date'] ??
+            source['created_at'] ??
+            source['date_created_gmt'] ??
+            '',
+      ),
+      paymentMethod: TextSanitizer.fix(
+        source['payment_method_title'] ??
+            source['payment_method'] ??
+            source['payment_title'] ??
+            '',
+      ),
+      customerId: int.tryParse('${source['customer_id'] ?? 0}') ?? 0,
+      customer: AdminOrderCustomer.fromJson(customerRaw),
+      totals: AdminOrderTotals.fromJson(totalsRaw),
+      items: items,
+      invoiceUrl: TextSanitizer.fix(
+        source['invoice_url'] ??
+            source['invoice'] ??
+            source['pdf_invoice_url'] ??
+            '',
+      ),
+      warehouseCode: TextSanitizer.fix(source['warehouse_code']),
+      warehouseLabel: TextSanitizer.fix(source['warehouse_label']),
+      warehouseCodes:
+          ((source['warehouse_codes'] as List?) ?? const <dynamic>[])
+              .map((entry) => TextSanitizer.fix(entry))
+              .where((entry) => entry.isNotEmpty)
+              .toList(growable: false),
+    );
+  }
+}

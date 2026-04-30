@@ -1,0 +1,844 @@
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import 'package:lpco_llc/app/router/app_routes.dart';
+import 'package:lpco_llc/core/navigation/app_back_scope.dart';
+import 'package:lpco_llc/core/widgets/brand_app_bar.dart';
+import 'package:lpco_llc/core/widgets/glass.dart';
+import 'package:lpco_llc/features/admin/data/repositories/admin_repository.dart';
+import 'package:lpco_llc/features/admin/domain/admin_module.dart';
+
+class AdminModuleScreen extends StatefulWidget {
+  final String moduleId;
+
+  const AdminModuleScreen({super.key, required this.moduleId});
+
+  @override
+  State<AdminModuleScreen> createState() => _AdminModuleScreenState();
+}
+
+class _AdminModuleScreenState extends State<AdminModuleScreen> {
+  final AdminRepository _repository = AdminRepository();
+  final TextEditingController _searchController = TextEditingController();
+
+  AdminModule? _module;
+  dynamic _data;
+  bool _loading = true;
+  String? _error;
+  int _page = 1;
+
+  bool get _supportsSearch {
+    if (_module == null) return false;
+    return _module!.kind == AdminModuleKind.orders ||
+        _module!.kind == AdminModuleKind.users ||
+        _module!.kind == AdminModuleKind.members ||
+        _module!.kind == AdminModuleKind.products ||
+        _module!.kind == AdminModuleKind.reviews;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load({int? page}) async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      if (page != null) {
+        _page = page;
+      }
+    });
+
+    try {
+      final discovery = await _repository.discoverModules();
+      AdminModule? module;
+      for (final item in discovery.modules) {
+        if (item.id == widget.moduleId) {
+          module = item;
+          break;
+        }
+      }
+
+      if (module == null) {
+        setState(() {
+          _module = null;
+          _data = null;
+          _loading = false;
+          _error = 'الوحدة المطلوبة غير موجودة.';
+        });
+        return;
+      }
+
+      dynamic payload;
+      if (module.isAvailable) {
+        payload = await _fetchModuleData(module);
+      }
+
+      setState(() {
+        _module = module;
+        _data = payload;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = e.toString().replaceAll('Exception: ', '');
+      });
+    }
+  }
+
+  Future<dynamic> _fetchModuleData(AdminModule module) {
+    final search = _searchController.text.trim();
+    switch (module.kind) {
+      case AdminModuleKind.stats:
+        return _repository.fetchStats();
+      case AdminModuleKind.orders:
+        return _repository.fetchOrders(page: _page, search: search);
+      case AdminModuleKind.users:
+        return _repository.fetchUsers(page: _page, search: search);
+      case AdminModuleKind.members:
+        return _repository.fetchMembers(page: _page, search: search);
+      case AdminModuleKind.settings:
+        return _repository.fetchSettings();
+      case AdminModuleKind.diagnostics:
+        return _repository.fetchDiagnostics();
+      case AdminModuleKind.notifications:
+        return _repository.fetchNotificationsHistory(page: _page);
+      case AdminModuleKind.homeBanner:
+        return _repository.fetchHomeBanner();
+      case AdminModuleKind.homeLayout:
+        return _repository.fetchHomeLayout();
+      case AdminModuleKind.appTheme:
+        return _repository.fetchAppTheme();
+      case AdminModuleKind.products:
+        return _repository.fetchProducts(
+          page: _page,
+          search: search,
+          readOnlyFallback: module.support == AdminModuleSupport.readOnly,
+        );
+      case AdminModuleKind.reviews:
+        return _repository.fetchReviews(
+          page: _page,
+          search: search,
+          readOnlyFallback: module.support == AdminModuleSupport.readOnly,
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final moduleTitle = _module?.title ?? 'وحدة الإدارة';
+    return AppBackScope(
+      fallbackLocation: AppRoutePaths.admin,
+      child: Scaffold(
+        extendBody: true,
+        extendBodyBehindAppBar: true,
+        appBar: BrandAppBar(title: moduleTitle, showBack: true),
+        floatingActionButton: _buildFab(),
+        body: _buildBody(),
+      ),
+    );
+  }
+
+  Widget? _buildFab() {
+    final module = _module;
+    if (module == null) return null;
+    if (module.kind != AdminModuleKind.notifications) return null;
+    if (module.support != AdminModuleSupport.full) return null;
+
+    return FloatingActionButton.extended(
+      onPressed: _showSendNotificationDialog,
+      backgroundColor: GlassStyle.fireRed,
+      icon: const Icon(Icons.send),
+      label: const Text('إرسال إشعار'),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: GlassStyle.acrylicDecoration(radius: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Icon(
+                  Icons.error_outline,
+                  color: GlassStyle.fireRed,
+                  size: 54,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                FilledButton(
+                  onPressed: _load,
+                  child: const Text('إعادة المحاولة'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final module = _module;
+    if (module == null) {
+      return const SizedBox.shrink();
+    }
+
+    if (module.support == AdminModuleSupport.unavailable) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: GlassStyle.acrylicDecoration(radius: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Icon(
+                  Icons.link_off_rounded,
+                  color: GlassStyle.fireRed,
+                  size: 54,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  module.gapMessage ??
+                      'هذه الوحدة غير متوفرة في إضافة ووردبريس الحالية.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 90, 16, 8),
+          child: Column(
+            children: <Widget>[
+              if (module.support == AdminModuleSupport.readOnly &&
+                  (module.gapMessage?.isNotEmpty ?? false))
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: GlassStyle.acrylicDecoration(
+                    radius: 14,
+                    color: const Color(0xFFFFF5F5),
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(
+                        Icons.info_outline_rounded,
+                        color: GlassStyle.fireRed,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          module.gapMessage!,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_supportsSearch)
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) => _load(page: 1),
+                        decoration: const InputDecoration(
+                          hintText: 'ابحث...',
+                          prefixIcon: Icon(Icons.search_rounded),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filledTonal(
+                      onPressed: () => _load(page: 1),
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () => _load(page: _page),
+            child: _buildModuleContent(module),
+          ),
+        ),
+        if (_supportsPagination(module))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _page <= 1 ? null : () => _load(page: _page - 1),
+                    icon: const Icon(Icons.chevron_right_rounded),
+                    label: const Text('السابق'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: GlassStyle.acrylicDecoration(radius: 12),
+                  child: Text('الصفحة $_page'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _load(page: _page + 1),
+                    icon: const Icon(Icons.chevron_left_rounded),
+                    label: const Text('التالي'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  bool _supportsPagination(AdminModule module) {
+    return module.kind == AdminModuleKind.orders ||
+        module.kind == AdminModuleKind.users ||
+        module.kind == AdminModuleKind.members ||
+        module.kind == AdminModuleKind.products ||
+        module.kind == AdminModuleKind.reviews ||
+        module.kind == AdminModuleKind.notifications;
+  }
+
+  Widget _buildModuleContent(AdminModule module) {
+    switch (module.kind) {
+      case AdminModuleKind.stats:
+      case AdminModuleKind.settings:
+      case AdminModuleKind.diagnostics:
+      case AdminModuleKind.homeBanner:
+      case AdminModuleKind.homeLayout:
+      case AdminModuleKind.appTheme:
+        return _buildSingleMapView(_asMap(_data));
+      case AdminModuleKind.orders:
+        return _buildOrdersView(_asList(_data));
+      case AdminModuleKind.members:
+        return _buildMembersView(_asList(_data));
+      case AdminModuleKind.users:
+      case AdminModuleKind.products:
+      case AdminModuleKind.reviews:
+      case AdminModuleKind.notifications:
+        return _buildListView(_asList(_data));
+    }
+  }
+
+  Widget _buildSingleMapView(Map<String, dynamic> map) {
+    if (map.isEmpty) {
+      return const _EmptyModuleState();
+    }
+
+    final entries = map.entries.toList();
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      itemCount: entries.length,
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+        final value = entry.value;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: GlassStyle.acrylicDecoration(radius: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                entry.key,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  color: GlassStyle.fireRed,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value is Map || value is List ? value.toString() : '$value',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildOrdersView(List<Map<String, dynamic>> rows) {
+    if (rows.isEmpty) {
+      return const _EmptyModuleState();
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      itemCount: rows.length,
+      itemBuilder: (context, index) {
+        final item = rows[index];
+        final orderId =
+            int.tryParse('${item['id'] ?? item['order_id'] ?? 0}') ?? 0;
+        final number = '${item['number'] ?? orderId}';
+        final status = '${item['status'] ?? ''}';
+        final customer = '${item['customer'] ?? item['customer_name'] ?? ''}';
+        final total = '${item['total'] ?? item['amount'] ?? ''}';
+        final currency = '${item['currency'] ?? ''}'.toUpperCase();
+
+        return TapScale(
+          onTap: orderId <= 0
+              ? null
+              : () => context.push(AppRoutePaths.adminOrder(orderId)),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: GlassStyle.acrylicDecoration(radius: 14),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        '#$number',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        status,
+                        style: const TextStyle(
+                          color: GlassStyle.fireRed,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (customer.trim().isNotEmpty) Text(customer),
+                      if (total.trim().isNotEmpty) Text('$total $currency'),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_left_rounded),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMembersView(List<Map<String, dynamic>> rows) {
+    if (rows.isEmpty) {
+      return const _EmptyModuleState();
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      itemCount: rows.length,
+      itemBuilder: (context, index) {
+        final member = rows[index];
+        final name = _text(member, const <String>[
+          'name',
+          'username',
+        ], fallback: '#عضو');
+        final email = _text(member, const <String>['email']);
+        final phone = _text(member, const <String>['phone']);
+        final company = _text(member, const <String>['company']);
+        final group = _text(member, const <String>[
+          'group',
+        ], fallback: 'default');
+        final currency = _text(member, const <String>[
+          'currency',
+        ], fallback: 'syp').toUpperCase();
+        final status = _text(member, const <String>[
+          'account_status',
+        ], fallback: 'غير محدد');
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: GlassStyle.acrylicDecoration(radius: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+              if (email.isNotEmpty)
+                Text(
+                  email,
+                  style: const TextStyle(
+                    color: GlassStyle.fireRed,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  _chipLabel('المجموعة: $group'),
+                  _chipLabel('العملة: $currency'),
+                  _chipLabel('الحالة: $status'),
+                ],
+              ),
+              if (company.isNotEmpty || phone.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 8),
+                if (company.isNotEmpty)
+                  Text(
+                    'المنشأة: $company',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                if (phone.isNotEmpty)
+                  Text(
+                    'الهاتف: $phone',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _chipLabel(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: GlassStyle.fireRed.withValues(alpha: 0.10),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontWeight: FontWeight.w800,
+          color: GlassStyle.fireRed,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildListView(List<Map<String, dynamic>> rows) {
+    if (rows.isEmpty) {
+      return const _EmptyModuleState();
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      itemCount: rows.length,
+      itemBuilder: (context, index) {
+        final item = rows[index];
+        final title = _text(item, const <String>[
+          'title',
+          'name',
+          'subject',
+          'id',
+        ], fallback: '#$index');
+        final subtitle = _text(item, const <String>[
+          'email',
+          'status',
+          'slug',
+          'date',
+          'created_at',
+        ]);
+
+        final previewEntries = item.entries
+            .where((entry) => entry.key != 'title' && entry.key != 'name')
+            .take(4)
+            .toList();
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: GlassStyle.acrylicDecoration(radius: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+              if (subtitle.trim().isNotEmpty) ...<Widget>[
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: GlassStyle.fireRed,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+              if (previewEntries.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 6),
+                ...previewEntries.map(
+                  (entry) => Text(
+                    '${entry.key}: ${entry.value}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _text(
+    Map<String, dynamic> item,
+    List<String> keys, {
+    String fallback = '',
+  }) {
+    for (final key in keys) {
+      final value = item[key];
+      if (value == null) {
+        continue;
+      }
+      final text = value.toString().trim();
+      if (text.isNotEmpty) {
+        return text;
+      }
+    }
+    return fallback;
+  }
+
+  Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return const <String, dynamic>{};
+  }
+
+  List<Map<String, dynamic>> _asList(dynamic value) {
+    if (value is List) {
+      return value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    }
+    return const <Map<String, dynamic>>[];
+  }
+
+  Future<void> _showSendNotificationDialog() async {
+    final titleController = TextEditingController();
+    final bodyController = TextEditingController();
+    final imageController = TextEditingController();
+    final linkController = TextEditingController();
+    final targetUserController = TextEditingController();
+    String audience = 'all';
+    bool sending = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (_, setDialogState) {
+            Future<void> submit() async {
+              if (titleController.text.trim().isEmpty ||
+                  bodyController.text.trim().isEmpty ||
+                  sending) {
+                return;
+              }
+
+              setDialogState(() => sending = true);
+              try {
+                await _repository.sendNotification(
+                  title: titleController.text.trim(),
+                  body: bodyController.text.trim(),
+                  audience: audience,
+                  imageUrl: imageController.text.trim(),
+                  deepLink: linkController.text.trim(),
+                  targetUserId: int.tryParse(targetUserController.text.trim()),
+                );
+
+                if (!mounted) return;
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('تم إرسال الإشعار بنجاح')),
+                );
+                _load(page: 1);
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('تعذر الإرسال: $e')));
+              } finally {
+                if (mounted) {
+                  setDialogState(() => sending = false);
+                }
+              }
+            }
+
+            return AlertDialog(
+              title: const Text('إرسال إشعار'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(labelText: 'العنوان'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: bodyController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(labelText: 'النص'),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: audience,
+                      decoration: const InputDecoration(labelText: 'الجمهور'),
+                      items: const <DropdownMenuItem<String>>[
+                        DropdownMenuItem(value: 'all', child: Text('الكل')),
+                        DropdownMenuItem(
+                          value: 'logged_in',
+                          child: Text('العملاء'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'guests',
+                          child: Text('الإدارة'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'single_user',
+                          child: Text('مستخدم محدد'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        audience = value ?? 'all';
+                        setDialogState(() {});
+                      },
+                    ),
+                    if (audience == 'single_user') ...<Widget>[
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: targetUserController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'معرف المستخدم',
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: imageController,
+                      decoration: const InputDecoration(
+                        labelText: 'رابط الصورة (اختياري)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: linkController,
+                      decoration: const InputDecoration(
+                        labelText: 'Deep Link (اختياري)',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: sending
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton(
+                  onPressed: sending ? null : submit,
+                  child: Text(sending ? 'جارٍ الإرسال...' : 'إرسال'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    titleController.dispose();
+    bodyController.dispose();
+    imageController.dispose();
+    linkController.dispose();
+    targetUserController.dispose();
+  }
+}
+
+class _EmptyModuleState extends StatelessWidget {
+  const _EmptyModuleState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: GlassStyle.acrylicDecoration(radius: 16),
+          child: const Column(
+            children: <Widget>[
+              Icon(Icons.inbox_rounded, size: 56, color: GlassStyle.fireRed),
+              SizedBox(height: 10),
+              Text(
+                'لا توجد بيانات متاحة حالياً.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}

@@ -1,0 +1,431 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+
+import 'package:lpco_llc/app/router/app_routes.dart';
+import 'package:lpco_llc/app/router/app_router.dart';
+import 'package:lpco_llc/core/navigation/app_back_navigation.dart';
+import 'package:lpco_llc/core/layout/shell_layout.dart';
+import 'package:lpco_llc/core/theme/app_animations.dart';
+import 'package:lpco_llc/core/theme/app_theme.dart';
+import 'package:lpco_llc/core/utils/text_sanitizer.dart';
+import 'package:lpco_llc/features/cart/presentation/cubit/cart_cubit.dart';
+
+class MainShellScreen extends StatefulWidget {
+  final StatefulNavigationShell navigationShell;
+
+  const MainShellScreen({super.key, required this.navigationShell});
+
+  static final List<_ShellItemData> _items = <_ShellItemData>[
+    _ShellItemData.branch(
+      label: 'الرئيسية',
+      icon: Icons.home_outlined,
+      activeIcon: Icons.home_rounded,
+      branchIndex: 0,
+    ),
+    _ShellItemData.branch(
+      label: 'التصنيفات',
+      icon: Icons.grid_view_outlined,
+      activeIcon: Icons.grid_view,
+      branchIndex: 1,
+    ),
+    _ShellItemData.branch(
+      label: 'العلامات التجارية',
+      icon: Icons.storefront_outlined,
+      activeIcon: Icons.storefront,
+      branchIndex: 2,
+    ),
+    _ShellItemData.branch(
+      label: 'السلة',
+      icon: Icons.shopping_bag_outlined,
+      activeIcon: Icons.shopping_bag_rounded,
+      branchIndex: 4,
+      isCart: true,
+    ),
+    _ShellItemData.branch(
+      label: 'حسابي',
+      icon: Icons.person_outline_rounded,
+      activeIcon: Icons.person_rounded,
+      branchIndex: 5,
+    ),
+  ];
+
+  @override
+  State<MainShellScreen> createState() => _MainShellScreenState();
+}
+
+class _MainShellScreenState extends State<MainShellScreen> {
+  DateTime? _lastExitAttemptAt;
+
+  bool _isPrimaryPath(String path) {
+    return path == AppRoutePaths.home ||
+        path == AppRoutePaths.categories ||
+        path == AppRoutePaths.catalog ||
+        path == AppRoutePaths.brands ||
+        path == AppRoutePaths.saved ||
+        path == AppRoutePaths.cart ||
+        path == AppRoutePaths.account;
+  }
+
+  GlobalKey<NavigatorState>? _currentBranchNavigatorKey(int branchIndex) {
+    switch (branchIndex) {
+      case 0:
+        return AppRouter.homeBranchNavigatorKey;
+      case 1:
+        return AppRouter.catalogBranchNavigatorKey;
+      case 2:
+        return AppRouter.brandsBranchNavigatorKey;
+      case 3:
+        return AppRouter.favoritesBranchNavigatorKey;
+      case 4:
+        return AppRouter.cartBranchNavigatorKey;
+      case 5:
+        return AppRouter.profileBranchNavigatorKey;
+      default:
+        return null;
+    }
+  }
+
+  bool _isNestedInBranch(int branchIndex) {
+    final key = _currentBranchNavigatorKey(branchIndex);
+    return key?.currentState?.canPop() ?? false;
+  }
+
+  bool _shouldShowBottomNav(BuildContext context) {
+    final path = GoRouterState.of(context).uri.path;
+    if (!_isPrimaryPath(path)) {
+      return false;
+    }
+    return !_isNestedInBranch(widget.navigationShell.currentIndex);
+  }
+
+  int _resolveSelectedIndex(BuildContext context) {
+    final uri = GoRouterState.of(context).uri;
+    final path = uri.path;
+
+    if (path == AppRoutePaths.home) return 0;
+    if (path == AppRoutePaths.categories ||
+        path == AppRoutePaths.categoriesCatalog ||
+        path == AppRoutePaths.catalog) {
+      return 1;
+    }
+    if (path == AppRoutePaths.brands || path == AppRoutePaths.brandsCatalog) {
+      return 2;
+    }
+    if (path == AppRoutePaths.cart) return 3;
+    if (path == AppRoutePaths.account) return 4;
+
+    return switch (widget.navigationShell.currentIndex) {
+      0 => 0,
+      1 => 1,
+      2 => 2,
+      3 => 1, // Favorites/Saved highlights Categories/Catalog
+      4 => 3,
+      5 => 4,
+      _ => 0,
+    };
+  }
+
+  Future<void> _handleSystemBack() async {
+    final currentPath = GoRouterState.of(context).uri.path;
+    final isHomeTab = currentPath == AppRoutePaths.home;
+    final canPopBranch = _isNestedInBranch(widget.navigationShell.currentIndex);
+
+    // 1. If we can pop the internal branch navigator, do it
+    if (canPopBranch) {
+      final key = _currentBranchNavigatorKey(widget.navigationShell.currentIndex);
+      key?.currentState?.pop();
+      return;
+    }
+
+    // 2. If we are NOT on the Home tab root, navigate to Home tab root first
+    if (!isHomeTab) {
+      HapticFeedback.mediumImpact();
+      widget.navigationShell.goBranch(0);
+      return;
+    }
+
+    // 3. We are on the Home tab root. Handle double-back to exit.
+    final now = DateTime.now();
+    final shouldConfirmExit =
+        _lastExitAttemptAt == null ||
+        now.difference(_lastExitAttemptAt!) > const Duration(seconds: 2);
+
+    if (shouldConfirmExit) {
+      _lastExitAttemptAt = now;
+      HapticFeedback.warningImpact();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.exit_to_app_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 12),
+                Text(
+                  TextSanitizer.fix('اضغط مرة أخرى للخروج من التطبيق'),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFF2D3748),
+            duration: const Duration(seconds: 2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.fromLTRB(20, 0, 20, 100), // Elevated above nav
+          ),
+        );
+      return;
+    }
+
+    // 4. Second press within time limit - actually exit
+    if (!kIsWeb) {
+      await SystemNavigator.pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showBottomNav = _shouldShowBottomNav(context);
+    final selectedIndex = _resolveSelectedIndex(context);
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          return;
+        }
+        _handleSystemBack();
+      },
+      child: Scaffold(
+        body: widget.navigationShell,
+        bottomNavigationBar: showBottomNav
+            ? Padding(
+                padding: EdgeInsets.fromLTRB(
+                  ShellLayout.navHorizontalPadding,
+                  ShellLayout.navTopPadding,
+                  ShellLayout.navHorizontalPadding,
+                  ShellLayout.navBottomInset(context),
+                ),
+                child: _FloatingShellNav(
+                  items: MainShellScreen._items,
+                  currentIndex: selectedIndex,
+                  onTap: (item, index) {
+                    HapticFeedback.selectionClick();
+                    final branchIndex = item.branchIndex;
+                    if (branchIndex == null) {
+                      return;
+                    }
+                    widget.navigationShell.goBranch(
+                      branchIndex,
+                      initialLocation:
+                          branchIndex == widget.navigationShell.currentIndex,
+                    );
+                  },
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+}
+
+class _FloatingShellNav extends StatelessWidget {
+  final List<_ShellItemData> items;
+  final int currentIndex;
+  final void Function(_ShellItemData item, int index) onTap;
+
+  const _FloatingShellNav({
+    required this.items,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  int _cartCountOf(CartState state) {
+    if (state is CartLoaded) {
+      return state.totalCount;
+    }
+    return 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: ShellLayout.navHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE6EAF1)),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x150B1524),
+            blurRadius: 18,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: List<Widget>.generate(items.length, (int index) {
+          final item = items[index];
+          if (item.isCart) {
+            return Expanded(
+              child: BlocBuilder<CartCubit, CartState>(
+                buildWhen: (previous, current) =>
+                    _cartCountOf(previous) != _cartCountOf(current),
+                builder: (context, state) {
+                  return _ShellNavItem(
+                    data: item,
+                    selected: currentIndex == index,
+                    badgeCount: _cartCountOf(state),
+                    onTap: () => onTap(item, index),
+                  );
+                },
+              ),
+            );
+          }
+          return Expanded(
+            child: _ShellNavItem(
+              data: item,
+              selected: currentIndex == index,
+              onTap: () => onTap(item, index),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class _ShellNavItem extends StatelessWidget {
+  final _ShellItemData data;
+  final bool selected;
+  final int? badgeCount;
+  final VoidCallback onTap;
+
+  const _ShellNavItem({
+    required this.data,
+    required this.selected,
+    this.badgeCount,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final activeColor = AppTheme.primaryColor;
+    final idleColor = const Color(0xFF7C8695);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: AppAnimations.resolveDuration(context, AppAnimations.fast),
+        curve: AppAnimations.smooth,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFEEF0) : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                Icon(
+                  selected ? data.activeIcon : data.icon,
+                  size: 21,
+                  color: selected ? activeColor : idleColor,
+                ),
+                if (data.isCart)
+                  PositionedDirectional(
+                    top: -8,
+                    end: -11,
+                    child: _CartBadge(count: badgeCount ?? 0),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              TextSanitizer.fix(data.label),
+              maxLines: 1,
+              overflow: TextOverflow.fade,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                color: selected ? activeColor : idleColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShellItemData {
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+  final int? branchIndex;
+  final bool isCart;
+
+  const _ShellItemData.branch({
+    required this.label,
+    required this.icon,
+    required this.activeIcon,
+    required this.branchIndex,
+    this.isCart = false,
+  });
+}
+
+class _CartBadge extends StatelessWidget {
+  final int count;
+
+  const _CartBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = AppAnimations.resolveDuration(context, AppAnimations.fast);
+    return AnimatedSwitcher(
+      duration: duration,
+      switchInCurve: AppAnimations.emphasized,
+      switchOutCurve: AppAnimations.smoothIn,
+      transitionBuilder: (Widget child, Animation<double> animation) {
+        return ScaleTransition(
+          scale: animation,
+          child: FadeTransition(opacity: animation, child: child),
+        );
+      },
+      child: count <= 0
+          ? const SizedBox.shrink(key: ValueKey<String>('empty-badge'))
+          : Container(
+              key: ValueKey<int>(count),
+              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                count > 99 ? '99+' : '$count',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+    );
+  }
+}
