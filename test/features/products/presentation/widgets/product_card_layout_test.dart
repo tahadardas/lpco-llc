@@ -200,7 +200,7 @@ void main() {
     expect(addedUnit!.type, 'piece');
   });
 
-  testWidgets('keeps unit choices visible even when unit prices are equal', (
+  testWidgets('hides package choice when unit prices are equal', (
     tester,
   ) async {
     ProductCardUnit? addedUnit;
@@ -215,27 +215,21 @@ void main() {
 
     expect(
       find.byKey(const ValueKey<String>('product_card_unit_piece')),
-      findsOneWidget,
+      findsNothing,
     );
     expect(
       find.byKey(const ValueKey<String>('product_card_unit_package')),
-      findsOneWidget,
+      findsNothing,
     );
 
     final addButtonFinder = find.byKey(
       const ValueKey<String>('product_card_add_button'),
     );
-    expect(tester.widget<FilledButton>(addButtonFinder).onPressed, isNull);
-
-    await tester.tap(
-      find.byKey(const ValueKey<String>('product_card_unit_package')),
-    );
-    await tester.pumpAndSettle();
     expect(tester.widget<FilledButton>(addButtonFinder).onPressed, isNotNull);
 
     await tester.tap(addButtonFinder);
     await tester.pumpAndSettle();
     expect(addedUnit, isNotNull);
-    expect(addedUnit!.type, 'package');
+    expect(addedUnit!.type, 'piece');
   });
 }

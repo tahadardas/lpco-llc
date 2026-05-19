@@ -75,6 +75,7 @@ if (!defined('DMS_ECOM_DEBUG')) {
 include_once DMS_ECOM_PATH . 'includes/members.php';
 include_once DMS_ECOM_PATH . 'includes/categories.php';
 include_once DMS_ECOM_PATH . 'includes/products.php';
+include_once DMS_ECOM_PATH . 'includes/product-barcodes.php';
 include_once DMS_ECOM_PATH . 'includes/pricing-display.php';
 include_once DMS_ECOM_PATH . 'includes/display-everywhere.php';
 include_once DMS_ECOM_PATH . 'includes/product-ordering.php';

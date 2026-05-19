@@ -74,20 +74,27 @@ function dms_prices_box($post) {
 }
 }
 
+if (!function_exists('dms_sanitize_product_price_text')) {
+function dms_sanitize_product_price_text($value) {
+    $value = function_exists('wp_unslash') ? wp_unslash($value) : $value;
+    return sanitize_text_field($value);
+}
+}
+
 add_action('save_post_product', function($post_id) {
     if (isset($_POST['dms_price'])) {
         update_post_meta($post_id, '_dms_prices', array_map(function($row) {
             return [
-                'syp_piece' => sanitize_text_field($row['syp_piece'] ?? ''),
-                'usd_piece' => sanitize_text_field($row['usd_piece'] ?? ''),
+                'syp_piece' => dms_sanitize_product_price_text($row['syp_piece'] ?? ''),
+                'usd_piece' => dms_sanitize_product_price_text($row['usd_piece'] ?? ''),
                 'show_syp_piece' => isset($row['show_syp_piece']) ? true : false,
                 'show_usd_piece' => isset($row['show_usd_piece']) ? true : false,
                 'show_syp_package' => isset($row['show_syp_package']) ? true : false,
                 'show_usd_package' => isset($row['show_usd_package']) ? true : false,
                 'box_pieces_count' => isset($row['box_pieces_count']) && $row['box_pieces_count'] !== '' ? absint($row['box_pieces_count']) : '',
-                'box_unit_name' => sanitize_text_field($row['box_unit_name'] ?? ''),
+                'box_unit_name' => dms_sanitize_product_price_text($row['box_unit_name'] ?? ''),
                 'package_pieces_count' => isset($row['package_pieces_count']) && $row['package_pieces_count'] !== '' ? absint($row['package_pieces_count']) : '',
-                'package_unit_name' => sanitize_text_field($row['package_unit_name'] ?? '')
+                'package_unit_name' => dms_sanitize_product_price_text($row['package_unit_name'] ?? '')
             ];
         }, $_POST['dms_price']));
     }

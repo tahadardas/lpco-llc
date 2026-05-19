@@ -49,6 +49,27 @@ class LocalSearchIndex {
     await updateIncremental(scope: scope, products: products);
   }
 
+  Future<void> clearScope(String scope) async {
+    final existingIds = _getIds(scope);
+    final keys = <dynamic>[
+      _allIdsKey(scope),
+      ...existingIds.map((id) => _itemKey(scope, id)),
+    ];
+    await _storage.searchIndexBox.deleteAll(keys);
+  }
+
+  Future<void> clearAll() async {
+    final keys = _storage.searchIndexBox.keys
+        .where((key) {
+          final value = key.toString();
+          return value.startsWith('idx_s::') || value.startsWith('idx_s_all::');
+        })
+        .toList(growable: false);
+    if (keys.isNotEmpty) {
+      await _storage.searchIndexBox.deleteAll(keys);
+    }
+  }
+
   /// Efficient query without JSON full-scan
   List<int> queryProductIds({required String scope, required String query}) {
     final normalized = _normalize(query);
@@ -85,11 +106,34 @@ class LocalSearchIndex {
 
   String _buildDocument(Map<String, dynamic> product) {
     final parts = <String>[
+      product['id']?.toString() ?? '',
       product['name']?.toString() ?? '',
+      product['slug']?.toString() ?? '',
       product['sku']?.toString() ?? '',
       product['barcode']?.toString() ?? '',
+      product['barcode_1']?.toString() ?? '',
+      product['barcode_2']?.toString() ?? '',
+      product['barcode_3']?.toString() ?? '',
+      product['barcode_4']?.toString() ?? '',
       product['brand_slug']?.toString() ?? '',
     ];
+
+    final barcodes = product['barcodes'];
+    if (barcodes is List) {
+      for (final barcode in barcodes) {
+        parts.add(barcode?.toString() ?? '');
+      }
+    }
+
+    final metaData = product['meta_data'];
+    if (metaData is List) {
+      for (final meta in metaData.whereType<Map>()) {
+        final key = (meta['key'] ?? '').toString().toLowerCase();
+        if (key.contains('barcode') || key == 'ean' || key == 'upc') {
+          parts.add(meta['value']?.toString() ?? '');
+        }
+      }
+    }
 
     final cats = product['categories'];
     if (cats is List) {

@@ -173,74 +173,103 @@ class ProductCubit extends Cubit<ProductState> {
     if (state.status == ProductStatus.loading) {
       emit(state.copyWith(initialSyncDone: false));
     }
+    var catalogRevisionChanged = false;
     try {
-      final results = await Future.wait([
-        _repository.getCachedProducts(
-          page: 1,
-          perPage: AppConfig.productsPerPage,
-          categoryId: state.selectedCategoryId,
-          search: state.searchQuery.isEmpty ? null : state.searchQuery,
-          brandSlug: state.selectedBrandSlug,
-          stock: state.stockFilter,
-          sortBy: state.sortBy,
-          guest: state.isGuest,
-        ),
-        _repository.getCachedCategories(guest: state.isGuest),
-        _repository.getCachedBrands(guest: state.isGuest),
-        _repository.getCachedHomeBannerData(guest: state.isGuest),
-      ]);
+      catalogRevisionChanged = await _repository.syncCatalogRevision(
+        guest: state.isGuest,
+      );
+    } catch (_) {}
 
-      final cachedProducts = results[0] as List<ProductModel>;
-      final cachedCategories = results[1] as List<CategoryModel>;
-      final cachedBrands = results[2] as List<BrandModel>;
-      final cachedBanner = results[3] as HomeBannerData;
-
-      if (cachedProducts.isNotEmpty || cachedCategories.isNotEmpty) {
-        emit(
-          state.copyWith(
-            status: ProductStatus.loaded,
-            products: cachedProducts,
-            categories: cachedCategories,
-            brands: cachedBrands,
+    if (!catalogRevisionChanged) {
+      try {
+        final results = await Future.wait([
+          _repository.getCachedProducts(
             page: 1,
-            hasMore: cachedProducts.length >= AppConfig.productsPerPage,
-            homeBannerImageUrl: cachedBanner.imageUrl,
-            homeBannerTitle: cachedBanner.title,
-            homeBannerSubtitle: cachedBanner.subtitle,
-            homeBannerButtonLabel: cachedBanner.buttonLabel,
-            homeBannerButtonLink: cachedBanner.buttonLink,
-            homeBannerEnabled: cachedBanner.enabled,
-            bannerProductIds: cachedBanner.productIds,
-            useActiveProductIndex: true,
+            perPage: AppConfig.productsPerPage,
+            categoryId: state.selectedCategoryId,
+            search: state.searchQuery.isEmpty ? null : state.searchQuery,
+            brandSlug: state.selectedBrandSlug,
+            stock: state.stockFilter,
+            sortBy: state.sortBy,
+            guest: state.isGuest,
           ),
-        );
-      } else {
+          _repository.getCachedCategories(guest: state.isGuest),
+          _repository.getCachedBrands(guest: state.isGuest),
+          _repository.getCachedHomeBannerData(guest: state.isGuest),
+        ]);
+
+        final cachedProducts = results[0] as List<ProductModel>;
+        final cachedCategories = results[1] as List<CategoryModel>;
+        final cachedBrands = results[2] as List<BrandModel>;
+        final cachedBanner = results[3] as HomeBannerData;
+
+        if (cachedProducts.isNotEmpty || cachedCategories.isNotEmpty) {
+          _logBrandOrder(
+            'local cached ids=${_idsForLog(cachedProducts)}',
+            brandSlug: state.selectedBrandSlug,
+          );
+          emit(
+            state.copyWith(
+              status: ProductStatus.loaded,
+              products: cachedProducts,
+              categories: cachedCategories,
+              brands: cachedBrands,
+              page: 1,
+              hasMore: cachedProducts.length >= AppConfig.productsPerPage,
+              homeBannerImageUrl: cachedBanner.imageUrl,
+              homeBannerTitle: cachedBanner.title,
+              homeBannerSubtitle: cachedBanner.subtitle,
+              homeBannerButtonLabel: cachedBanner.buttonLabel,
+              homeBannerButtonLink: cachedBanner.buttonLink,
+              homeBannerEnabled: cachedBanner.enabled,
+              bannerProductIds: cachedBanner.productIds,
+              useActiveProductIndex: true,
+            ),
+          );
+        } else {
+          emit(state.copyWith(status: ProductStatus.loading));
+        }
+      } catch (_) {
         emit(state.copyWith(status: ProductStatus.loading));
       }
-    } catch (_) {
+    } else {
       emit(state.copyWith(status: ProductStatus.loading));
     }
 
     // 2. Fetch Remote (Background)
     try {
+      _logBrandOrder(
+        'ui ids before remote=${_idsForLog(state.products)}',
+        brandSlug: state.selectedBrandSlug,
+      );
+      _logBrandOrder(
+        'request brand=${state.selectedBrandSlug?.trim()} page=1 sortBy=${state.sortBy}',
+        brandSlug: state.selectedBrandSlug,
+      );
+      final productsPageFuture = _repository.getProductsPage(
+        page: 1,
+        categoryId: state.selectedCategoryId,
+        search: state.searchQuery.isEmpty ? null : state.searchQuery,
+        brandSlug: state.selectedBrandSlug,
+        stock: state.stockFilter,
+        orderBy: _mapOrderBy(state.sortBy),
+        order: _mapOrder(state.sortBy),
+        guest: state.isGuest,
+      );
       final results = await Future.wait([
-        _repository.getProducts(
-          page: 1,
-          categoryId: state.selectedCategoryId,
-          search: state.searchQuery.isEmpty ? null : state.searchQuery,
-          brandSlug: state.selectedBrandSlug,
-          stock: state.stockFilter,
-          orderBy: _mapOrderBy(state.sortBy),
-          order: _mapOrder(state.sortBy),
-          guest: state.isGuest,
-        ),
+        productsPageFuture,
         _repository.getCategories(guest: state.isGuest),
         _repository.getBrands(guest: state.isGuest),
         _repository.getHomeBannerData(guest: state.isGuest),
       ]);
 
-      final remoteProducts = results[0] as List<ProductModel>;
+      final productsPage = results[0] as CatalogProductsPage;
+      final remoteProducts = productsPage.products;
       final bannerData = results[3] as HomeBannerData;
+      _logBrandOrder(
+        'remote ids=${_idsForLog(remoteProducts)}',
+        brandSlug: state.selectedBrandSlug,
+      );
 
       List<ProductModel> bannerProducts = [];
       if (bannerData.productIds.isNotEmpty) {
@@ -248,9 +277,14 @@ class ProductCubit extends Cubit<ProductState> {
           bannerProducts = await _repository.getProductsByIds(
             bannerData.productIds,
             guest: state.isGuest,
+            includeGallery: true,
           );
         } catch (e) {
-          debugPrint('[BANNER_SYNC_ERROR] Failed to fetch banner products: $e');
+          if (kDebugMode) {
+            debugPrint(
+              '[BANNER_SYNC_ERROR] Failed to fetch banner products: $e',
+            );
+          }
         }
       }
 
@@ -262,7 +296,7 @@ class ProductCubit extends Cubit<ProductState> {
           brands: results[2] as List<BrandModel>,
           bannerProducts: bannerProducts,
           page: 1,
-          hasMore: remoteProducts.length >= AppConfig.productsPerPage,
+          hasMore: productsPage.meta.hasMore,
           errorMessage: '',
           homeBannerImageUrl: bannerData.imageUrl,
           homeBannerTitle: bannerData.title,
@@ -274,6 +308,10 @@ class ProductCubit extends Cubit<ProductState> {
           initialSyncDone: true,
           useActiveProductIndex: true,
         ),
+      );
+      _logBrandOrder(
+        'ui ids after remote=${_idsForLog(remoteProducts)}',
+        brandSlug: state.selectedBrandSlug,
       );
     } catch (e) {
       if (state.products.isEmpty) {
@@ -300,7 +338,11 @@ class ProductCubit extends Cubit<ProductState> {
 
     try {
       final nextPage = state.page + 1;
-      final nextItems = await _repository.getProducts(
+      _logBrandOrder(
+        'request brand=${state.selectedBrandSlug?.trim()} page=$nextPage sortBy=${state.sortBy}',
+        brandSlug: state.selectedBrandSlug,
+      );
+      final nextPageResult = await _repository.getProductsPage(
         page: nextPage,
         categoryId: state.selectedCategoryId,
         search: state.searchQuery.isEmpty ? null : state.searchQuery,
@@ -310,20 +352,30 @@ class ProductCubit extends Cubit<ProductState> {
         order: _mapOrder(state.sortBy),
         guest: state.isGuest,
       );
+      final nextItems = nextPageResult.products;
+      _logBrandOrder(
+        'remote ids=${_idsForLog(nextItems)}',
+        brandSlug: state.selectedBrandSlug,
+      );
 
       // Deduplicate by ID
       final existingIds = state.products.map((p) => p.id).toSet();
       final deduped = nextItems
           .where((p) => !existingIds.contains(p.id))
           .toList();
+      final merged = [...state.products, ...deduped];
 
       emit(
         state.copyWith(
           status: ProductStatus.loaded,
-          products: [...state.products, ...deduped],
+          products: merged,
           page: nextPage,
-          hasMore: nextItems.length >= AppConfig.productsPerPage,
+          hasMore: nextPageResult.meta.hasMore,
         ),
+      );
+      _logBrandOrder(
+        'ui ids after remote=${_idsForLog(merged)}',
+        brandSlug: state.selectedBrandSlug,
       );
     } catch (e) {
       emit(
@@ -363,8 +415,18 @@ class ProductCubit extends Cubit<ProductState> {
     _debounce = Timer(const Duration(milliseconds: 500), () => initialize());
   }
 
-  Future<void> refresh() async {
-    emit(state.copyWith(page: 1, products: []));
+  Future<void> refresh({bool forceRemote = true}) async {
+    emit(
+      state.copyWith(
+        page: 1,
+        products: const <ProductModel>[],
+        status: ProductStatus.loading,
+        initialSyncDone: false,
+      ),
+    );
+    if (forceRemote) {
+      await _repository.syncCatalogRevision(guest: state.isGuest);
+    }
     await initialize();
   }
 
@@ -398,6 +460,7 @@ class ProductCubit extends Cubit<ProductState> {
       final products = await _repository.getProductsByIds(
         savedIds.toList(),
         guest: state.isGuest,
+        includeGallery: true,
       );
       return products;
     } catch (e) {
@@ -416,7 +479,26 @@ class ProductCubit extends Cubit<ProductState> {
 
   String? _mapOrder(String sortBy) {
     if (sortBy == 'price_asc') return 'asc';
-    return 'desc';
+    if (sortBy == 'price_desc' || sortBy == 'newest') return 'desc';
+    return null;
+  }
+
+  void _logBrandOrder(String message, {required String? brandSlug}) {
+    if (!kDebugMode) {
+      return;
+    }
+    final normalized = brandSlug?.trim();
+    if (normalized == null || normalized.isEmpty || state.sortBy != 'default') {
+      return;
+    }
+    debugPrint('[BRAND_ORDER] $message');
+  }
+
+  String _idsForLog(List<ProductModel> products) {
+    const maxIds = 30;
+    final ids = products.take(maxIds).map((product) => product.id).toList();
+    final suffix = products.length > maxIds ? ', ...' : '';
+    return '[${ids.join(',')}$suffix]';
   }
 
   // ... toggleSaved and other UI-only methods remain same ...

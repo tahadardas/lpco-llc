@@ -65,12 +65,67 @@ class HomeBannerData {
   }
 }
 
+class CatalogResponseMeta {
+  final int page;
+  final int perPage;
+  final int count;
+  final int? total;
+  final int? totalPages;
+  final String catalogRevision;
+
+  const CatalogResponseMeta({
+    required this.page,
+    required this.perPage,
+    required this.count,
+    this.total,
+    this.totalPages,
+    this.catalogRevision = '',
+  });
+
+  bool get hasServerPaging => totalPages != null && totalPages! >= 0;
+
+  bool get hasMore {
+    if (totalPages != null) {
+      return page < totalPages!;
+    }
+    return count >= perPage;
+  }
+
+  factory CatalogResponseMeta.fromJson(
+    Map<String, dynamic> json, {
+    required int fallbackPage,
+    required int fallbackPerPage,
+    required int fallbackCount,
+  }) {
+    return CatalogResponseMeta(
+      page: _intFrom(json['page']) ?? fallbackPage,
+      perPage: _intFrom(json['per_page']) ?? fallbackPerPage,
+      count: _intFrom(json['count']) ?? fallbackCount,
+      total: _intFrom(json['total']),
+      totalPages: _intFrom(json['total_pages']),
+      catalogRevision: (json['catalog_revision'] ?? '').toString(),
+    );
+  }
+}
+
+class CatalogProductsPage {
+  final List<ProductModel> products;
+  final CatalogResponseMeta meta;
+  final bool fromLocalFallback;
+
+  const CatalogProductsPage({
+    required this.products,
+    required this.meta,
+    this.fromLocalFallback = false,
+  });
+}
+
 class ProductRepository {
   final DioClient _dioClient;
   final StorageService _storageService = StorageService();
   final CatalogLocalStore _catalogLocalStore = CatalogLocalStore();
   final ReachabilityService _reachabilityService = ReachabilityService();
-  static const String _pricingRev = '2026-03-09-1';
+  static const String _pricingRev = ''; // Empty to force live data
   String _lastResolvedScope = 'guest';
 
   ProductRepository({DioClient? dioClient})
@@ -78,6 +133,66 @@ class ProductRepository {
 
   void invalidateCache() {
     // Cache invalidation no longer needed - removed static session-sensitive cache
+  }
+
+  Future<bool> syncCatalogRevision({bool guest = false}) async {
+    final reachability = _reachabilityService.current;
+    if (reachability.status == ReachabilityStatus.offline) {
+      return false;
+    }
+
+    try {
+      final response = await _dioClient.dio.get(
+        '/dms/v1/catalog-version',
+        queryParameters: <String, dynamic>{
+          '_t': DateTime.now().millisecondsSinceEpoch,
+          if (guest) 'guest': 1,
+        },
+        options: _requestOptions(
+          skipAuth: true,
+          cachePolicy: CachePolicy.noCache,
+        ),
+      );
+
+      final payload = response.data;
+      if (payload is! Map) {
+        return false;
+      }
+
+      final map = Map<String, dynamic>.from(payload);
+      final revision = (map['catalog_revision'] ?? '').toString().trim();
+      if (revision.isEmpty) {
+        return false;
+      }
+
+      const metaKey = 'catalog_revision::global';
+      final previous = _storageService.readSyncMeta(metaKey);
+      final previousRevision = (previous?['catalog_revision'] ?? '')
+          .toString()
+          .trim();
+      if (previousRevision == revision) {
+        return false;
+      }
+
+      await _catalogLocalStore.clearAllCatalogProducts();
+      await _storageService.saveSyncMeta(metaKey, <String, dynamic>{
+        'catalog_revision': revision,
+        'products_updated_at': (map['products_updated_at'] ?? '').toString(),
+        'synced_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+      if (kDebugMode) {
+        debugPrint(
+          '[CATALOG_REVISION] changed $previousRevision -> $revision; cleared catalog product/category/brand cache.',
+        );
+      }
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[CATALOG_REVISION] check failed: $e');
+      }
+      return false;
+    }
   }
 
   Future<List<ProductModel>> getProducts({
@@ -91,11 +206,46 @@ class ProductRepository {
     String? order,
     bool guest = false,
   }) async {
+    final result = await getProductsPage(
+      page: page,
+      perPage: perPage,
+      categoryId: categoryId,
+      search: search,
+      brandSlug: brandSlug,
+      stock: stock,
+      orderBy: orderBy,
+      order: order,
+      guest: guest,
+    );
+    return result.products;
+  }
+
+  Future<CatalogProductsPage> getProductsPage({
+    int page = 1,
+    int perPage = AppConfig.productsPerPage,
+    int? categoryId,
+    String? search,
+    String? brandSlug,
+    String stock = 'all',
+    String? orderBy,
+    String? order,
+    bool guest = false,
+  }) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
+    final normalizedBrandSlug = _normalizeBrandSlug(brandSlug);
+    final hasBrandScope = normalizedBrandSlug != null;
+    final hasSearch = search?.trim().isNotEmpty == true;
+    final isBrandDefaultOrder = hasBrandScope && orderBy == null;
+    final canCacheOrderedBrand =
+        isBrandDefaultOrder &&
+        page >= 1 &&
+        categoryId == null &&
+        !hasSearch &&
+        _isAllStock(stock);
 
     if (reachability.status == ReachabilityStatus.offline) {
-      return _loadProductsFromLocal(
+      final fallback = _loadProductsFromLocal(
         scope: scope,
         page: page,
         perPage: perPage,
@@ -105,14 +255,27 @@ class ProductRepository {
         stock: stock,
         sortBy: orderBy == 'price' ? 'price_$order' : orderBy,
       );
+      return CatalogProductsPage(
+        products: fallback,
+        meta: CatalogResponseMeta(
+          page: page,
+          perPage: perPage,
+          count: fallback.length,
+        ),
+        fromLocalFallback: true,
+      );
     }
 
     try {
       final query = <String, dynamic>{
         'page': page,
         'per_page': perPage,
-        'pricing_rev': _pricingRev,
+        'envelope': 1,
+        'include_gallery': 1,
       };
+      if (_pricingRev.isNotEmpty) {
+        query['pricing_rev'] = _pricingRev;
+      }
       query.addAll(await _userScopeQuery(guest: guest));
       if (categoryId != null) {
         query['category'] = categoryId;
@@ -126,7 +289,9 @@ class ProductRepository {
       if (stock != 'all') {
         query['stock'] = stock;
       }
-      if (orderBy == null && _shouldRequestInStockFirst(stock: stock)) {
+      if (orderBy == null &&
+          !isBrandDefaultOrder &&
+          _shouldRequestInStockFirst(stock: stock)) {
         query['stock_order'] = 'in_first';
       }
       if (orderBy != null) {
@@ -139,6 +304,12 @@ class ProductRepository {
         query['guest'] = 1;
       }
 
+      if (kDebugMode && hasBrandScope) {
+        debugPrint(
+          '[BRAND_ORDER] request brand=$normalizedBrandSlug page=$page sortBy=${orderBy ?? 'default'}',
+        );
+      }
+
       final response = await _dioClient.dio.get(
         '/dms/v1/products-plus',
         queryParameters: query,
@@ -149,16 +320,31 @@ class ProductRepository {
       );
 
       if (response.statusCode == 200 || response.statusCode == 304) {
-        final rawProducts = _extractProductsData(response.data);
-        debugPrint(
-          '[REPO] getProducts(page: $page, cat: $categoryId, search: $search) -> Returned ${rawProducts.length} items',
+        final parsedPage = _extractProductsPage(
+          response.data,
+          fallbackPage: page,
+          fallbackPerPage: perPage,
         );
-        if (rawProducts.isNotEmpty) {
+        final rawProducts = parsedPage.$1;
+        final meta = parsedPage.$2;
+        if (kDebugMode && hasBrandScope) {
           debugPrint(
-            '[REPO] First product keys: ${rawProducts.first.keys.toList()}',
+            '[BRAND_ORDER] remote ids=${_idsForLog(_rawProductIds(rawProducts))} brand=$normalizedBrandSlug page=$page',
           );
+        }
+        if (rawProducts.isNotEmpty) {
+          if (kDebugMode) {
+            final first = rawProducts.first;
+            debugPrint(
+              '[REPO] getProducts page=$page count=${rawProducts.length} total=${meta.total} totalPages=${meta.totalPages} scope=${guest ? 'guest' : 'user'} params={cat:$categoryId, brand:$brandSlug, search:${search?.trim().isNotEmpty == true}}',
+            );
+            debugPrint(
+              '[REPO] sample product id=${first['id']} sku=${first['sku']}',
+            );
+          }
+        } else if (kDebugMode) {
           debugPrint(
-            '[REPO] First product featured: ${rawProducts.first['featured']} / ${rawProducts.first['is_featured']}',
+            '[REPO] getProducts page=$page returned 0 products scope=${guest ? 'guest' : 'user'} params={cat:$categoryId, brand:$brandSlug, search:${search?.trim().isNotEmpty == true}}',
           );
         }
 
@@ -169,22 +355,27 @@ class ProductRepository {
             brandSlug == null) {
           _catalogLocalStore
               .cacheProducts(scope: scope, products: rawProducts)
-              .catchError(
-                (e) => debugPrint(
-                  '[SYNC_ERROR] Background products cache failed: $e',
-                ),
-              );
+              .catchError((e) {
+                if (kDebugMode) {
+                  debugPrint(
+                    '[SYNC_ERROR] Background products cache failed: $e',
+                  );
+                }
+              });
         } else {
           await _catalogLocalStore.cacheProducts(
             scope: scope,
             products: rawProducts,
+            orderedBrandSlug: canCacheOrderedBrand ? normalizedBrandSlug : null,
+            replaceOrderedBrandIndex: canCacheOrderedBrand && page == 1,
           );
         }
 
-        return _toProductModels(
+        final products = _toProductModels(
           rawProducts,
-          context: 'getProducts:/dms/v1/products-plus',
+          context: 'getProductsPage:/dms/v1/products-plus',
         );
+        return CatalogProductsPage(products: products, meta: meta);
       }
 
       throw Exception('Failed to load products: ${response.statusCode}');
@@ -200,7 +391,15 @@ class ProductRepository {
         sortBy: orderBy == 'price' ? 'price_$order' : orderBy,
       );
       if (fallback.isNotEmpty) {
-        return fallback;
+        return CatalogProductsPage(
+          products: fallback,
+          meta: CatalogResponseMeta(
+            page: page,
+            perPage: perPage,
+            count: fallback.length,
+          ),
+          fromLocalFallback: true,
+        );
       }
       throw Exception(ApiContract.extractErrorMessage(e.response?.data));
     }
@@ -210,25 +409,50 @@ class ProductRepository {
     required ProductSearchQuery query,
     bool guest = false,
   }) async {
+    final result = await searchProductsWithFiltersPage(
+      query: query,
+      guest: guest,
+    );
+    return result.products;
+  }
+
+  Future<CatalogProductsPage> searchProductsWithFiltersPage({
+    required ProductSearchQuery query,
+    bool guest = false,
+  }) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
 
     if (reachability.status == ReachabilityStatus.offline) {
-      return _searchProductsFromLocal(scope: scope, query: query);
+      final fallback = _searchProductsFromLocal(scope: scope, query: query);
+      return CatalogProductsPage(
+        products: fallback,
+        meta: CatalogResponseMeta(
+          page: query.page,
+          perPage: query.perPage,
+          count: fallback.length,
+        ),
+        fromLocalFallback: true,
+      );
     }
 
     try {
       final params = <String, dynamic>{
         ...query.toQueryParameters(),
         ...await _userScopeQuery(guest: guest),
-        'pricing_rev': _pricingRev,
+        'envelope': 1,
+        'include_gallery': 1,
         if (guest) 'guest': 1,
       };
+      if (_pricingRev.isNotEmpty) {
+        params['pricing_rev'] = _pricingRev;
+      }
       final hasExplicitOrdering =
           params['orderby'] != null &&
           params['orderby'].toString().trim().isNotEmpty;
       if (!params.containsKey('stock_order') &&
           !hasExplicitOrdering &&
+          !_hasBrandScopeParam(params) &&
           _shouldRequestInStockFirst(
             stock: (params['stock'] ?? params['stock_status'] ?? 'all')
                 .toString(),
@@ -246,15 +470,38 @@ class ProductRepository {
       );
 
       if (response.statusCode == 200 || response.statusCode == 304) {
-        final rawProducts = _extractProductsData(response.data);
+        final parsedPage = _extractProductsPage(
+          response.data,
+          fallbackPage: query.page,
+          fallbackPerPage: query.perPage,
+        );
+        final rawProducts = parsedPage.$1;
+        final meta = parsedPage.$2;
+        final brandSlug = _brandScopeFromParams(params);
+        if (kDebugMode && brandSlug != null) {
+          debugPrint(
+            '[BRAND_ORDER] remote ids=${_idsForLog(_rawProductIds(rawProducts))} brand=$brandSlug page=${query.page}',
+          );
+        }
+        final canCacheOrderedBrandSearch =
+            brandSlug != null && _isPlainDefaultBrandQuery(query);
         await _catalogLocalStore.cacheProducts(
           scope: scope,
           products: rawProducts,
+          orderedBrandSlug: canCacheOrderedBrandSearch ? brandSlug : null,
+          replaceOrderedBrandIndex:
+              canCacheOrderedBrandSearch && query.page == 1,
         );
-        return _toProductModels(
+        if (kDebugMode) {
+          debugPrint(
+            '[REPO] search query="${query.search}" count=${rawProducts.length} total=${meta.total} page=${meta.page}/${meta.totalPages ?? 0} scope=${guest ? 'guest' : 'user'} params=$params',
+          );
+        }
+        final products = _toProductModels(
           rawProducts,
-          context: 'searchProductsWithFilters:/dms/v1/products-plus',
+          context: 'searchProductsWithFiltersPage:/dms/v1/products-plus',
         );
+        return CatalogProductsPage(products: products, meta: meta);
       }
 
       throw Exception(
@@ -263,7 +510,15 @@ class ProductRepository {
     } on DioException catch (e) {
       final fallback = _searchProductsFromLocal(scope: scope, query: query);
       if (fallback.isNotEmpty) {
-        return fallback;
+        return CatalogProductsPage(
+          products: fallback,
+          meta: CatalogResponseMeta(
+            page: query.page,
+            perPage: query.perPage,
+            count: fallback.length,
+          ),
+          fromLocalFallback: true,
+        );
       }
       throw Exception(ApiContract.extractErrorMessage(e.response?.data));
     }
@@ -271,17 +526,38 @@ class ProductRepository {
 
   Future<ProductModel?> getProductById(int id, {bool guest = false}) async {
     final scope = await _scopeFor(guest: guest);
-    final local = _catalogLocalStore.getProductById(
-      scope: scope,
-      productId: id,
-    );
-    if (local != null && local.isNotEmpty) {
-      return _tryParseProduct(local, context: 'getProductById:local-cache');
+    final reachability = _reachabilityService.current;
+    if (reachability.status == ReachabilityStatus.offline) {
+      final local = _catalogLocalStore.getProductById(
+        scope: scope,
+        productId: id,
+      );
+      if (local != null && local.isNotEmpty) {
+        return _tryParseProduct(local, context: 'getProductById:local-cache');
+      }
+      return null;
     }
 
-    final products = await getProductsByIds(<int>[id], guest: guest);
-    if (products.isEmpty) return null;
-    return products.first;
+    try {
+      final products = await getProductsByIds(
+        <int>[id],
+        guest: guest,
+        includeGallery: true,
+      );
+      if (products.isNotEmpty) return products.first;
+    } catch (_) {
+      final local = _catalogLocalStore.getProductById(
+        scope: scope,
+        productId: id,
+      );
+      if (local != null && local.isNotEmpty) {
+        return _tryParseProduct(
+          local,
+          context: 'getProductById:local-fallback',
+        );
+      }
+    }
+    return null;
   }
 
   Future<ProductModel?> getProductBySlug(
@@ -293,26 +569,27 @@ class ProductRepository {
     final localScope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
 
-    // Check local store first (as fallback/optimization)
-    final local = _catalogLocalStore.getProductBySlug(
-      scope: localScope,
-      slug: slug,
-    );
-    if (local != null) {
-      return _tryParseProduct(local, context: 'getProductBySlug:local-cache');
-    }
-
     if (reachability.status == ReachabilityStatus.offline) {
-      return null;
+      final local = _catalogLocalStore.getProductBySlug(
+        scope: localScope,
+        slug: slug,
+      );
+      return local == null
+          ? null
+          : _tryParseProduct(local, context: 'getProductBySlug:local-cache');
     }
 
     try {
       final query = <String, dynamic>{
         'slug': slug,
-        'pricing_rev': _pricingRev,
+        'envelope': 1,
+        'include_gallery': 1,
         ...await _userScopeQuery(guest: guest),
         if (guest) 'guest': 1,
       };
+      if (_pricingRev.isNotEmpty) {
+        query['pricing_rev'] = _pricingRev;
+      }
 
       final response = await _dioClient.dio.get(
         '/dms/v1/products-plus',
@@ -336,13 +613,20 @@ class ProductRepository {
       }
       return null;
     } catch (_) {
-      return null;
+      final local = _catalogLocalStore.getProductBySlug(
+        scope: localScope,
+        slug: slug,
+      );
+      return local == null
+          ? null
+          : _tryParseProduct(local, context: 'getProductBySlug:local-fallback');
     }
   }
 
   Future<List<ProductModel>> getProductsByIds(
     List<int> ids, {
     bool guest = false,
+    bool includeGallery = false,
   }) async {
     if (ids.isEmpty) {
       return <ProductModel>[];
@@ -361,23 +645,31 @@ class ProductRepository {
             return productId != null && ids.contains(productId);
           })
           .map(
-            (raw) =>
-                _tryParseProduct(raw, context: 'getProductsByIds:offline-local'),
+            (raw) => _tryParseProduct(
+              raw,
+              context: 'getProductsByIds:offline-local',
+            ),
           )
           .whereType<ProductModel>()
           .toList(growable: false);
     }
 
     final scopeQuery = await _userScopeQuery(guest: guest);
+    final query = <String, dynamic>{
+      'include': ids.join(','),
+      'per_page': ids.length,
+      'envelope': 1,
+      ...scopeQuery,
+      if (guest) 'guest': 1,
+      if (includeGallery) 'include_gallery': 1,
+    };
+    if (_pricingRev.isNotEmpty) {
+      query['pricing_rev'] = _pricingRev;
+    }
+
     final response = await _dioClient.dio.get(
       '/dms/v1/products-plus',
-      queryParameters: <String, dynamic>{
-        'include': ids.join(','),
-        'per_page': ids.length,
-        'pricing_rev': _pricingRev,
-        ...scopeQuery,
-        if (guest) 'guest': 1,
-      },
+      queryParameters: query,
       options: _requestOptions(
         skipAuth: guest,
         cachePolicy: CachePolicy.noCache,
@@ -403,11 +695,13 @@ class ProductRepository {
     if (reachability.status == ReachabilityStatus.offline) {
       final local = _catalogLocalStore.getCategories(scope: scope);
       if (local.isNotEmpty) {
-        return local
+        final categories = local
             .where((entry) => !_isCategoryHidden(entry))
             .map(CategoryModel.fromJson)
             .where((category) => category.name.isNotEmpty)
             .toList(growable: false);
+        _logCategoryCounts('local cached', categories);
+        return categories;
       }
     }
 
@@ -437,9 +731,11 @@ class ProductRepository {
         );
       } on ApiContractException {
         if (payload is Map && payload.values.every((e) => e is Map)) {
-          debugPrint(
-            '[API_CONTRACT_WARNING] $endpoint returned map-object categories payload; applying compatibility normalization.',
-          );
+          if (kDebugMode) {
+            debugPrint(
+              '[API_CONTRACT_WARNING] $endpoint returned map-object categories payload; applying compatibility normalization.',
+            );
+          }
           list = payload.values.toList();
         } else {
           rethrow;
@@ -460,6 +756,7 @@ class ProductRepository {
         '/dms/v1/categories-guest',
         skipAuth: true,
       );
+      _logCategoryCounts('remote', categories);
       await _catalogLocalStore.cacheCategories(
         scope: scope,
         categories: categories
@@ -483,6 +780,7 @@ class ProductRepository {
           '/dms/v1/categories',
           skipAuth: guest,
         );
+        _logCategoryCounts('remote', categories);
         await _catalogLocalStore.cacheCategories(
           scope: scope,
           categories: categories
@@ -503,11 +801,13 @@ class ProductRepository {
       } catch (_) {
         final local = _catalogLocalStore.getCategories(scope: scope);
         if (local.isNotEmpty) {
-          return local
+          final categories = local
               .where((entry) => !_isCategoryHidden(entry))
               .map(CategoryModel.fromJson)
               .where((category) => category.name.isNotEmpty)
               .toList(growable: false);
+          _logCategoryCounts('local fallback', categories);
+          return categories;
         }
         rethrow;
       }
@@ -521,11 +821,13 @@ class ProductRepository {
     if (reachability.status == ReachabilityStatus.offline) {
       final local = _catalogLocalStore.getBrands(scope: scope);
       if (local.isNotEmpty) {
-        return local
+        final brands = local
             .where((entry) => !_isCategoryHidden(entry))
             .map(BrandModel.fromJson)
             .where((brand) => brand.name.isNotEmpty)
             .toList(growable: false);
+        _logBrandCounts('local cached', brands);
+        return brands;
       }
     }
 
@@ -533,48 +835,65 @@ class ProductRepository {
       String endpoint, {
       required bool skipAuth,
     }) async {
-      final response = await _dioClient.dio.get(
-        endpoint,
-        queryParameters: <String, dynamic>{
-          'per_page': AppConfig.brandsPerPage,
-          ...await _userScopeQuery(guest: guest),
-          if (guest) 'guest': 1,
-        },
-        options: _requestOptions(
-          skipAuth: skipAuth,
-          cachePolicy: CachePolicy.noCache,
-        ),
-      );
-      final payload = response.data;
-      late final List<dynamic> list;
-      try {
-        list = ApiContract.expectList(
-          payload,
-          endpoint: endpoint,
-          envelopeKeys: const <String>['data', 'items', 'brands'],
+      final brands = <BrandModel>[];
+      for (var page = 1; page <= 20; page += 1) {
+        final response = await _dioClient.dio.get(
+          endpoint,
+          queryParameters: <String, dynamic>{
+            'per_page': AppConfig.brandsPerPage,
+            'page': page,
+            ...await _userScopeQuery(guest: guest),
+            if (guest) 'guest': 1,
+          },
+          options: _requestOptions(
+            skipAuth: skipAuth,
+            cachePolicy: CachePolicy.noCache,
+          ),
         );
-      } on ApiContractException {
-        if (payload is Map && payload.values.every((e) => e is Map)) {
-          debugPrint(
-            '[API_CONTRACT_WARNING] $endpoint returned map-object brands payload; applying compatibility normalization.',
+        final payload = response.data;
+        late final List<dynamic> list;
+        try {
+          list = ApiContract.expectList(
+            payload,
+            endpoint: endpoint,
+            envelopeKeys: const <String>['data', 'items', 'brands'],
           );
-          list = payload.values.toList();
-        } else {
-          rethrow;
+        } on ApiContractException {
+          if (payload is Map && payload.values.every((e) => e is Map)) {
+            if (kDebugMode) {
+              debugPrint(
+                '[API_CONTRACT_WARNING] $endpoint returned map-object brands payload; applying compatibility normalization.',
+              );
+            }
+            list = payload.values.toList();
+          } else {
+            rethrow;
+          }
+        }
+
+        final pageBrands = list
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .where((entry) => !_isCategoryHidden(entry))
+            .map(BrandModel.fromJson)
+            .where((brand) => brand.name.isNotEmpty)
+            .toList(growable: false);
+        brands.addAll(pageBrands);
+
+        if (list.length < AppConfig.brandsPerPage) {
+          break;
         }
       }
 
-      return list
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .where((entry) => !_isCategoryHidden(entry))
-          .map(BrandModel.fromJson)
-          .where((brand) => brand.name.isNotEmpty)
-          .toList();
+      return brands;
     }
 
-    try {
-      final brands = await fromEndpoint('/dms/v1/brands-guest', skipAuth: true);
+    Future<List<BrandModel>> fetchAndCache(
+      String endpoint, {
+      required bool skipAuth,
+    }) async {
+      final brands = await fromEndpoint(endpoint, skipAuth: skipAuth);
+      _logBrandCounts('remote', brands);
       await _catalogLocalStore.cacheBrands(
         scope: scope,
         brands: brands
@@ -592,34 +911,29 @@ class ProductRepository {
             .toList(growable: false),
       );
       return brands;
+    }
+
+    try {
+      if (guest) {
+        return await fetchAndCache('/dms/v1/brands-guest', skipAuth: true);
+      }
+      return await fetchAndCache('/dms/v1/brands', skipAuth: false);
     } on DioException catch (_) {
       try {
-        final brands = await fromEndpoint('/dms/v1/brands', skipAuth: guest);
-        await _catalogLocalStore.cacheBrands(
-          scope: scope,
-          brands: brands
-              .map(
-                (brand) => <String, dynamic>{
-                  'id': brand.id,
-                  'name': brand.name,
-                  'slug': brand.slug,
-                  'count': brand.count,
-                  'image_url': brand.imageUrl,
-                  'show_in_app': true,
-                  'hidden': false,
-                },
-              )
-              .toList(growable: false),
+        return await fetchAndCache(
+          guest ? '/dms/v1/brands' : '/dms/v1/brands-guest',
+          skipAuth: true,
         );
-        return brands;
       } catch (_) {
         final local = _catalogLocalStore.getBrands(scope: scope);
         if (local.isNotEmpty) {
-          return local
+          final brands = local
               .where((entry) => !_isCategoryHidden(entry))
               .map(BrandModel.fromJson)
               .where((brand) => brand.name.isNotEmpty)
               .toList(growable: false);
+          _logBrandCounts('local fallback', brands);
+          return brands;
         }
         rethrow;
       }
@@ -718,54 +1032,12 @@ class ProductRepository {
     }
 
     try {
-      // 1. Fetch Featured Products (High Priority)
-      final featuredResponse = await _dioClient.dio.get(
-        '/dms/v1/products-plus',
-        queryParameters: <String, dynamic>{
-          'featured': 1,
-          'per_page': 40,
-          'pricing_rev': _pricingRev,
-          ...await _userScopeQuery(guest: guest),
-          if (guest) 'guest': 1,
-        },
-        options: _requestOptions(
-          skipAuth: guest,
-          cachePolicy: CachePolicy.noCache,
-        ),
-      );
-      final featured = _extractProductsData(featuredResponse.data);
-      debugPrint(
-        '[SYNC] syncCatalogSnapshot FEATURED -> Found ${featured.length}',
-      );
-      if (featured.isNotEmpty) {
-        await _catalogLocalStore.cacheProducts(
-          scope: scope,
-          products: featured,
-        );
-      }
-
-      // 2. Fetch Latest Arrivals
-      final latestResponse = await _dioClient.dio.get(
-        '/dms/v1/products-plus',
-        queryParameters: <String, dynamic>{
-          'orderby': 'date',
-          'order': 'desc',
-          'per_page': 80,
-          'pricing_rev': _pricingRev,
-          ...await _userScopeQuery(guest: guest),
-          if (guest) 'guest': 1,
-        },
-        options: _requestOptions(
-          skipAuth: guest,
-          cachePolicy: CachePolicy.noCache,
-        ),
-      );
-      final latest = _extractProductsData(latestResponse.data);
-      if (latest.isNotEmpty) {
-        await _catalogLocalStore.cacheProducts(scope: scope, products: latest);
-      }
+      await syncCatalogRevision(guest: guest);
+      await _syncAllProductPages(scope: scope, guest: guest);
     } catch (e) {
-      debugPrint('[SYNC_ERROR] Catalog snapshot failed: $e');
+      if (kDebugMode) {
+        debugPrint('[SYNC_ERROR] Catalog snapshot failed: $e');
+      }
     }
 
     try {
@@ -775,6 +1047,75 @@ class ProductRepository {
     try {
       await getBrands(guest: guest);
     } catch (_) {}
+  }
+
+  Future<void> _syncAllProductPages({
+    required String scope,
+    required bool guest,
+  }) async {
+    const perPage = 100;
+    var page = 1;
+    var synced = 0;
+    int? totalPages;
+
+    while (true) {
+      final params = <String, dynamic>{
+        'page': page,
+        'per_page': perPage,
+        'orderby': 'date',
+        'order': 'desc',
+        'envelope': 1,
+        'include_gallery': 1,
+        ...await _userScopeQuery(guest: guest),
+        if (guest) 'guest': 1,
+      };
+      if (_pricingRev.isNotEmpty) {
+        params['pricing_rev'] = _pricingRev;
+      }
+
+      final response = await _dioClient.dio.get(
+        '/dms/v1/products-plus',
+        queryParameters: params,
+        options: _requestOptions(
+          skipAuth: guest,
+          cachePolicy: CachePolicy.noCache,
+        ),
+      );
+
+      final parsedPage = _extractProductsPage(
+        response.data,
+        fallbackPage: page,
+        fallbackPerPage: perPage,
+      );
+      final rawProducts = parsedPage.$1;
+      final meta = parsedPage.$2;
+      totalPages = meta.totalPages;
+
+      if (rawProducts.isNotEmpty) {
+        await _catalogLocalStore.cacheProducts(
+          scope: scope,
+          products: rawProducts,
+        );
+        synced += rawProducts.length;
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          '[SYNC] catalog page=$page count=${rawProducts.length} synced=$synced totalPages=${totalPages ?? 0} scope=$scope',
+        );
+      }
+
+      final hasMore = totalPages != null
+          ? page < totalPages
+          : rawProducts.length >= perPage;
+      if (!hasMore) {
+        break;
+      }
+      page += 1;
+      if (page > 200) {
+        break;
+      }
+    }
   }
 
   Future<List<ProductModel>> getCachedProducts({
@@ -803,17 +1144,21 @@ class ProductRepository {
   Future<List<CategoryModel>> getCachedCategories({bool guest = false}) async {
     final scope = await _scopeFor(guest: guest);
     final local = _catalogLocalStore.getCategories(scope: scope);
-    return local
+    final categories = local
         .where((entry) => !_isCategoryHidden(entry))
         .map(CategoryModel.fromJson)
         .where((category) => category.name.isNotEmpty)
         .toList(growable: false);
+    _logCategoryCounts('local cached', categories);
+    return categories;
   }
 
   Future<List<BrandModel>> getCachedBrands({bool guest = false}) async {
     final scope = await _scopeFor(guest: guest);
     final local = _catalogLocalStore.getBrands(scope: scope);
-    return local.map(BrandModel.fromJson).toList(growable: false);
+    final brands = local.map(BrandModel.fromJson).toList(growable: false);
+    _logBrandCounts('local cached', brands);
+    return brands;
   }
 
   Future<String> _scopeFor({required bool guest}) async {
@@ -901,6 +1246,90 @@ class ProductRepository {
         normalized == 'all' ||
         normalized == 'any' ||
         normalized == 'instock';
+  }
+
+  bool _isAllStock(String stock) {
+    final normalized = stock.trim().toLowerCase();
+    return normalized.isEmpty || normalized == 'all' || normalized == 'any';
+  }
+
+  String? _normalizeBrandSlug(String? value) {
+    final normalized = value?.trim();
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+    return normalized;
+  }
+
+  bool _hasBrandScopeParam(Map<String, dynamic> params) {
+    return _brandScopeFromParams(params) != null;
+  }
+
+  String? _brandScopeFromParams(Map<String, dynamic> params) {
+    final raw = params['brand_slug'];
+    final normalized = raw?.toString().trim();
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+    return normalized;
+  }
+
+  bool _isPlainDefaultBrandQuery(ProductSearchQuery query) {
+    final extraKeys = query.extraParams.keys
+        .map((key) => key.trim().toLowerCase())
+        .where((key) => key.isNotEmpty)
+        .toSet();
+    return query.sortOption == ProductSortOption.defaultOrder &&
+        query.search.trim().isEmpty &&
+        query.categoryIds.isEmpty &&
+        query.minPrice == null &&
+        query.maxPrice == null &&
+        query.attributeFilter == null &&
+        _isAllStock(query.stockStatus) &&
+        extraKeys.difference(const <String>{'brand_slug'}).isEmpty;
+  }
+
+  Iterable<int> _rawProductIds(List<Map<String, dynamic>> products) {
+    return products.map((raw) => _intFrom(raw['id'])).whereType<int>();
+  }
+
+  String _idsForLog(Iterable<int> ids) {
+    const maxIds = 30;
+    final values = ids.take(maxIds).toList(growable: false);
+    final suffix = ids.length > maxIds ? ', ...' : '';
+    return '[${values.join(',')}$suffix]';
+  }
+
+  void _logCategoryCounts(String source, List<CategoryModel> categories) {
+    if (!kDebugMode) return;
+    debugPrint(
+      '[CATALOG_COUNTS] $source categories=${_categoryCountsForLog(categories)}',
+    );
+  }
+
+  void _logBrandCounts(String source, List<BrandModel> brands) {
+    if (!kDebugMode) return;
+    debugPrint('[CATALOG_COUNTS] $source brands=${_brandCountsForLog(brands)}');
+  }
+
+  String _categoryCountsForLog(List<CategoryModel> categories) {
+    const maxItems = 30;
+    final values = categories
+        .take(maxItems)
+        .map((category) => '${category.id}:${category.count}')
+        .toList(growable: false);
+    final suffix = categories.length > maxItems ? ', ...' : '';
+    return '[${values.join(',')}$suffix]';
+  }
+
+  String _brandCountsForLog(List<BrandModel> brands) {
+    const maxItems = 30;
+    final values = brands
+        .take(maxItems)
+        .map((brand) => '${brand.slug}:${brand.count}')
+        .toList(growable: false);
+    final suffix = brands.length > maxItems ? ', ...' : '';
+    return '[${values.join(',')}$suffix]';
   }
 
   Future<Map<String, dynamic>> _userScopeQuery({required bool guest}) async {
@@ -1165,10 +1594,10 @@ class ProductRepository {
       return ProductModel.fromJson(raw);
     } catch (error, stackTrace) {
       final id = raw['id'];
-      debugPrint(
-        '[PRODUCT_PARSE_GUARD] failed in $context for product id=$id: $error',
-      );
       if (kDebugMode) {
+        debugPrint(
+          '[PRODUCT_PARSE_GUARD] failed in $context for product id=$id: $error',
+        );
         debugPrintStack(
           label: '[PRODUCT_PARSE_GUARD_STACK]',
           stackTrace: stackTrace,
@@ -1191,6 +1620,37 @@ class ProductRepository {
     }
     return parsed;
   }
+}
+
+int? _intFrom(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value.trim());
+  return null;
+}
+
+(List<Map<String, dynamic>>, CatalogResponseMeta) _extractProductsPage(
+  dynamic responseData, {
+  required int fallbackPage,
+  required int fallbackPerPage,
+}) {
+  final products = _extractProductsData(responseData);
+  Map<String, dynamic> metaMap = const <String, dynamic>{};
+  if (responseData is Map) {
+    final map = Map<String, dynamic>.from(responseData);
+    final rawMeta = map['meta'];
+    if (rawMeta is Map) {
+      metaMap = Map<String, dynamic>.from(rawMeta);
+    }
+  }
+
+  final meta = CatalogResponseMeta.fromJson(
+    metaMap,
+    fallbackPage: fallbackPage,
+    fallbackPerPage: fallbackPerPage,
+    fallbackCount: products.length,
+  );
+  return (products, meta);
 }
 
 List<Map<String, dynamic>> _extractProductsData(dynamic responseData) {
@@ -1221,9 +1681,11 @@ List<Map<String, dynamic>> _extractProductsData(dynamic responseData) {
     }
 
     if (map.values.every((e) => e is Map)) {
-      debugPrint(
-        '[API_CONTRACT_WARNING] /dms/v1/products-plus returned map-object payload; applying compatibility normalization.',
-      );
+      if (kDebugMode) {
+        debugPrint(
+          '[API_CONTRACT_WARNING] /dms/v1/products-plus returned map-object payload; applying compatibility normalization.',
+        );
+      }
       for (final item in map.values) {
         parsed.add(Map<String, dynamic>.from(item as Map));
       }

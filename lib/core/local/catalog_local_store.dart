@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:lpco_llc/core/local/local_search_index.dart';
 import 'package:lpco_llc/core/storage/storage_service.dart';
 
@@ -22,6 +23,8 @@ class CatalogLocalStore {
       'idx_p_cat::$scope::$catId';
   String _brandProductsKey(String scope, String slug) =>
       'idx_p_brand::$scope::$slug';
+  String _brandOrderKey(String scope, String slug) =>
+      'idx_p_brand_order::$scope::$slug';
 
   String _categoryIdsKey(String scope) => 'idx_c_all::$scope';
   String _brandSlugsKey(String scope) => 'idx_b_all::$scope';
@@ -32,11 +35,23 @@ class CatalogLocalStore {
   Future<void> cacheProducts({
     required String scope,
     required List<Map<String, dynamic>> products,
+    String? orderedBrandSlug,
+    bool replaceOrderedBrandIndex = false,
   }) async {
-    if (products.isEmpty) return;
+    final normalizedOrderedBrand = _normalizeBrand(orderedBrandSlug ?? '');
+    if (products.isEmpty) {
+      if (normalizedOrderedBrand.isNotEmpty && replaceOrderedBrandIndex) {
+        await _storage.catalogBox.put(
+          _brandOrderKey(scope, normalizedOrderedBrand),
+          const <int>[],
+        );
+      }
+      return;
+    }
 
     final allIds = _getSet<int>(_productIdsKey(scope));
     final featIds = _getSet<int>(_featuredIdsKey(scope));
+    final orderedBrandIds = <int>[];
 
     final batch = <String, dynamic>{};
     final List<Map<String, dynamic>> productsToIndex = [];
@@ -61,17 +76,37 @@ class CatalogLocalStore {
         }
       }
 
-      // Update Brand Index
-      final brandSlug = _extractBrandSlug(raw);
-      if (brandSlug != null) {
-        final brandSet = _getSet<int>(_brandProductsKey(scope, brandSlug));
-        if (brandSet.add(id)) {
-          batch[_brandProductsKey(scope, brandSlug)] = brandSet.toList();
+      // Update brand membership index. This can be refreshed by general
+      // catalog syncs without changing the server-defined brand order index.
+      final brandSlugs = _extractBrandSlugs(raw);
+      for (final brandSlug in brandSlugs) {
+        final brandIds = _getList<int>(_brandProductsKey(scope, brandSlug));
+        if (!brandIds.contains(id)) {
+          brandIds.add(id);
+          batch[_brandProductsKey(scope, brandSlug)] = brandIds;
+        }
+        if (brandSlug == normalizedOrderedBrand) {
+          orderedBrandIds.add(id);
         }
       }
 
       batch[_productKey(scope, id)] = raw;
       productsToIndex.add(raw);
+    }
+
+    if (normalizedOrderedBrand.isNotEmpty && orderedBrandIds.isNotEmpty) {
+      final key = _brandOrderKey(scope, normalizedOrderedBrand);
+      final merged = replaceOrderedBrandIndex ? <int>[] : _getList<int>(key);
+      for (final id in orderedBrandIds) {
+        merged.remove(id);
+        merged.add(id);
+      }
+      batch[key] = merged;
+      if (kDebugMode) {
+        debugPrint(
+          '[BRAND_ORDER] local cached ids=${_idsForLog(merged)} brand=$normalizedOrderedBrand scope=$scope replace=$replaceOrderedBrandIndex',
+        );
+      }
     }
 
     batch[_productIdsKey(scope)] = allIds.toList();
@@ -127,6 +162,61 @@ class CatalogLocalStore {
     await _storage.catalogBox.put(_brandSlugsKey(scope), slugs);
   }
 
+  Future<void> clearCatalogScope(String scope) async {
+    final normalizedScope = scope.trim().isEmpty ? 'guest' : scope.trim();
+    final keys = _storage.catalogBox.keys
+        .where((key) {
+          final value = key.toString();
+          return value.startsWith('p::$normalizedScope::') ||
+              value.startsWith('c::$normalizedScope::') ||
+              value.startsWith('b::$normalizedScope::') ||
+              value == _productIdsKey(normalizedScope) ||
+              value == _featuredIdsKey(normalizedScope) ||
+              value == _categoryIdsKey(normalizedScope) ||
+              value == _brandSlugsKey(normalizedScope) ||
+              value.startsWith('idx_p_cat::$normalizedScope::') ||
+              value.startsWith('idx_p_brand::$normalizedScope::') ||
+              value.startsWith('idx_p_brand_order::$normalizedScope::');
+        })
+        .toList(growable: false);
+
+    if (keys.isNotEmpty) {
+      await _storage.catalogBox.deleteAll(keys);
+    }
+    await _searchIndex.clearScope(normalizedScope);
+    await _storage.syncMetaBox.delete('catalog::$normalizedScope');
+  }
+
+  Future<void> clearAllCatalogProducts() async {
+    final keys = _storage.catalogBox.keys
+        .where((key) {
+          final value = key.toString();
+          return value.startsWith('p::') ||
+              value.startsWith('c::') ||
+              value.startsWith('b::') ||
+              value.startsWith('idx_p_all::') ||
+              value.startsWith('idx_p_feat::') ||
+              value.startsWith('idx_p_cat::') ||
+              value.startsWith('idx_p_brand::') ||
+              value.startsWith('idx_p_brand_order::') ||
+              value.startsWith('idx_c_all::') ||
+              value.startsWith('idx_b_all::');
+        })
+        .toList(growable: false);
+
+    if (keys.isNotEmpty) {
+      await _storage.catalogBox.deleteAll(keys);
+    }
+    await _searchIndex.clearAll();
+
+    final syncKeys = _storage.syncMetaBox.keys
+        .where((key) => key.toString().startsWith('catalog::'))
+        .toList(growable: false);
+    if (syncKeys.isNotEmpty) {
+      await _storage.syncMetaBox.deleteAll(syncKeys);
+    }
+  }
+
   List<Map<String, dynamic>> getProducts({
     required String scope,
     int page = 1,
@@ -141,14 +231,26 @@ class CatalogLocalStore {
 
     Iterable<int> candidateIds;
     final query = (search ?? '').trim();
+    final normalizedBrandSlug = _normalizeBrand(brandSlug ?? '');
+    final preserveBrandOrder =
+        query.isEmpty &&
+        normalizedBrandSlug.isNotEmpty &&
+        _isDefaultSort(sortBy);
 
     if (query.isNotEmpty) {
       candidateIds = _searchIndex.queryProductIds(scope: scope, query: query);
+    } else if (preserveBrandOrder) {
+      final orderedIds = _getList<int>(
+        _brandOrderKey(scope, normalizedBrandSlug),
+      );
+      candidateIds = orderedIds.isNotEmpty
+          ? orderedIds
+          : _getList<int>(_brandProductsKey(scope, normalizedBrandSlug));
     } else if (categoryId != null) {
       candidateIds = _getSet<int>(_categoryProductsKey(scope, categoryId));
     } else if (brandSlug != null) {
-      candidateIds = _getSet<int>(
-        _brandProductsKey(scope, brandSlug.toLowerCase()),
+      candidateIds = _getList<int>(
+        _brandProductsKey(scope, normalizedBrandSlug),
       );
     } else if (sortBy == 'featured' || sortBy == 'default') {
       // For default sort, we might want to prioritize featured, but we still need all for the base list
@@ -168,7 +270,15 @@ class CatalogLocalStore {
       }
     }
 
-    _sortInPlace(products, sortBy);
+    if (preserveBrandOrder) {
+      if (kDebugMode) {
+        debugPrint(
+          '[BRAND_ORDER] local cached ids=${_idsForLog(products.map(_idFrom).whereType<int>())} brand=$normalizedBrandSlug scope=$scope',
+        );
+      }
+    } else {
+      _sortInPlace(products, sortBy);
+    }
 
     final start = (page - 1) * perPage;
     if (start >= products.length) return [];
@@ -206,7 +316,7 @@ class CatalogLocalStore {
   }
 
   List<Map<String, dynamic>> getCategories({required String scope}) {
-    final ids = _getSet<int>(_categoryIdsKey(scope));
+    final ids = _getList<int>(_categoryIdsKey(scope));
     final categories = <Map<String, dynamic>>[];
     for (final id in ids) {
       final raw = _storage.catalogBox.get(_categoryKey(scope, id));
@@ -216,7 +326,7 @@ class CatalogLocalStore {
   }
 
   List<Map<String, dynamic>> getBrands({required String scope}) {
-    final slugs = _getSet<String>(_brandSlugsKey(scope));
+    final slugs = _getList<String>(_brandSlugsKey(scope));
     final brands = <Map<String, dynamic>>[];
     for (final slug in slugs) {
       final raw = _storage.catalogBox.get(_brandKey(scope, slug));
@@ -230,7 +340,7 @@ class CatalogLocalStore {
     required String brandSlug,
   }) {
     final productIds = _getSet<int>(
-      _brandProductsKey(scope, brandSlug.toLowerCase()),
+      _brandProductsKey(scope, _normalizeBrand(brandSlug)),
     );
     final categoryIds = <int>{};
     for (final id in productIds) {
@@ -296,6 +406,12 @@ class CatalogLocalStore {
     return <T>{};
   }
 
+  List<T> _getList<T>(String key) {
+    final raw = _storage.catalogBox.get(key);
+    if (raw is List) return raw.cast<T>().toList(growable: true);
+    return <T>[];
+  }
+
   int? _idFrom(Map<String, dynamic> item) {
     final raw = item['id'];
     if (raw is int) return raw;
@@ -328,12 +444,50 @@ class CatalogLocalStore {
     return [];
   }
 
-  String? _extractBrandSlug(Map<String, dynamic> item) {
+  Set<String> _extractBrandSlugs(Map<String, dynamic> item) {
+    final slugs = <String>{};
+
+    // 1. New singular 'brand' object from API
+    final brand = item['brand'];
+    if (brand is Map) {
+      final slug = _normalizeBrand((brand['slug'] ?? '').toString());
+      if (slug.isNotEmpty) slugs.add(slug);
+    }
+
+    // 2. Multi-brand list from API
     final brands = item['brands'];
     if (brands is List && brands.isNotEmpty) {
-      return (brands.first['slug'] ?? '').toString().toLowerCase();
+      for (final rawBrand in brands) {
+        if (rawBrand is Map) {
+          final slug = _normalizeBrand((rawBrand['slug'] ?? '').toString());
+          if (slug.isNotEmpty) slugs.add(slug);
+        }
+      }
     }
-    return item['brand_slug']?.toString().toLowerCase();
+
+    // 3. Fallback to direct 'brand_slug' key
+    final rawSlug = (item['brand_slug'] ?? '').toString();
+    if (rawSlug.isNotEmpty) {
+      final slug = _normalizeBrand(rawSlug);
+      if (slug.isNotEmpty) slugs.add(slug);
+    }
+
+    return slugs;
+  }
+
+  String _normalizeBrand(String value) {
+    var normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return '';
+    }
+
+    // Standardize: replace underscores/spaces with dashes
+    normalized = normalized
+        .replaceAll(RegExp(r'[_\s]+'), '-')
+        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF-]+'), '')
+        .replaceAll(RegExp(r'-{2,}'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    return normalized;
   }
 
   double _priceFrom(Map<String, dynamic> item) =>
@@ -399,7 +553,19 @@ class CatalogLocalStore {
   bool _matchesCategory(Map<String, dynamic> item, int catId) =>
       _extractCategoryIds(item).contains(catId);
   bool _matchesBrand(Map<String, dynamic> item, String slug) =>
-      _extractBrandSlug(item) == slug;
+      _extractBrandSlugs(item).contains(_normalizeBrand(slug));
+
+  bool _isDefaultSort(String? sortBy) {
+    final normalized = (sortBy ?? 'default').trim().toLowerCase();
+    return normalized.isEmpty || normalized == 'default';
+  }
+
+  String _idsForLog(Iterable<int> ids) {
+    const maxIds = 30;
+    final values = ids.take(maxIds).toList(growable: false);
+    final suffix = ids.length > maxIds ? ', ...' : '';
+    return '[${values.join(',')}$suffix]';
+  }
 
   String _nameFrom(Map<String, dynamic> item) {
     return (item['name'] ?? item['product_name'] ?? '').toString().trim();

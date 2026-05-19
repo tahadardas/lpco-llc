@@ -8,6 +8,7 @@ import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
+import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 
 enum SearchFilterStatus { initial, loading, loaded, loadingMore, empty, error }
 
@@ -117,6 +118,9 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
 
   static const Duration _searchDebounceDuration = Duration(milliseconds: 500);
   static const int _brandListingPerPage = 20;
+  static const int _brandCuratedListingPerPage = 100;
+  static const int _cachedWarmPerPage = 200;
+  static const int _maxCuratedScanPages = 50;
 
   SearchFilterCubit({
     ProductRepository? repository,
@@ -173,6 +177,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
     );
 
     final scope = await _resolveUserScope(isGuest);
+    await _repository.syncCatalogRevision(guest: isGuest);
     List<CategoryModel> categories = state.categories;
     try {
       categories = await _repository.getCategories(guest: isGuest);
@@ -220,9 +225,11 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
           initialQuery = initialQuery.copyWith(
             categoryIds: <int>[matchedCategory.id],
           );
-          debugPrint(
-            '🎯 CuratedCategory RESOLVED: ID=${matchedCategory.id}, Slug=${matchedCategory.slug}',
-          );
+          if (kDebugMode) {
+            debugPrint(
+              'CuratedCategory resolved: id=${matchedCategory.id}, slug=${matchedCategory.slug}',
+            );
+          }
         } else if (initialQuery.categoryIds.isEmpty &&
             normalizedCuratedSlug.isNotEmpty) {
           initialQuery = initialQuery.copyWith(
@@ -398,6 +405,12 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
           ? <int>[categoryId]
           : const <int>[],
       page: 1,
+      perPage:
+          _hasBrandScope(state.query.extraParams) &&
+              categoryId != null &&
+              categoryId > 0
+          ? _brandCuratedListingPerPage
+          : state.query.perPage,
     );
 
     _emitSafe(state.copyWith(query: updatedQuery));
@@ -491,28 +504,134 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
     }
 
     try {
-      final fetched = await _fetchProductsForQuery(
-        _queryForRepository(requestQuery),
+      final strictSearch = _shouldUseStrictSearch(requestQuery);
+      if (reset) {
+        final cachedProducts = await _loadCachedProductsForQuery(
+          requestQuery,
+          strictSearch: strictSearch,
+        );
+        if (runId != _requestId || isClosed) {
+          return;
+        }
+        if (cachedProducts.isNotEmpty) {
+          final sortedCached = _sortProducts(
+            cachedProducts,
+            requestQuery.sortOption,
+          );
+          _logBrandOrder(
+            'local cached ids=${_idsForLog(sortedCached)}',
+            requestQuery,
+          );
+          if (_shouldDeferCachedPreview(requestQuery)) {
+            if (kDebugMode) {
+              debugPrint(
+                '[SCOPED_SYNC] deferred cached preview count=${sortedCached.length} until remote completes.',
+              );
+            }
+          } else {
+            final cachedAttributes = _extractAttributeOptions(sortedCached);
+            _emitSafe(
+              state.copyWith(
+                status: SearchFilterStatus.loaded,
+                products: sortedCached,
+                query: requestQuery,
+                hasMore: true,
+                colorOptions: cachedAttributes.$1,
+                sizeOptions: cachedAttributes.$2,
+                errorMessage: '',
+              ),
+            );
+          }
+        }
+      }
+
+      _logBrandOrder(
+        'ui ids before remote=${_idsForLog(state.products)}',
+        requestQuery,
       );
+      _logBrandOrder(
+        'request brand=${requestQuery.extraParams['brand_slug']} page=${requestQuery.page} sortBy=${requestQuery.sortOption.name}',
+        requestQuery,
+      );
+      var effectiveRequestQuery = requestQuery;
+      var useBrandOnlyCuratedFallback = false;
+      var fetchedPage = await _fetchProductsPageForQuery(
+        _queryForRepository(effectiveRequestQuery),
+      );
+      var fetched = fetchedPage.products;
+      _logBrandOrder('remote ids=${_idsForLog(fetched)}', requestQuery);
 
       if (runId != _requestId || isClosed) {
         return;
       }
 
-      final strictSearch = _shouldUseStrictSearch(requestQuery);
-      final searchedProducts = strictSearch
-          ? _applyStrictSearchFilter(fetched, requestQuery.search)
+      var searchedProducts = strictSearch
+          ? _applyStrictSearchFilter(fetched, effectiveRequestQuery.search)
           : fetched;
-      final effectiveFetched = _applyScopedFilters(
+      var effectiveFetched = _applyScopedFilters(
         searchedProducts,
-        requestQuery,
+        effectiveRequestQuery,
       );
+
+      if (_shouldTryBrandOnlyCuratedFallback(effectiveFetched, requestQuery)) {
+        useBrandOnlyCuratedFallback = true;
+        fetchedPage = await _fetchProductsPageForQuery(
+          _queryForRepository(
+            effectiveRequestQuery,
+            brandOnlyCuratedFallback: true,
+          ),
+        );
+        fetched = fetchedPage.products;
+        searchedProducts = strictSearch
+            ? _applyStrictSearchFilter(fetched, effectiveRequestQuery.search)
+            : fetched;
+        effectiveFetched = _applyScopedFilters(
+          searchedProducts,
+          effectiveRequestQuery,
+        );
+
+        if (runId != _requestId || isClosed) {
+          return;
+        }
+      }
+
+      var scannedRemotePages = 1;
+      while (_shouldScanMoreCuratedPages(
+        effectiveFetched: effectiveFetched,
+        meta: fetchedPage.meta,
+        requestQuery: requestQuery,
+        scannedRemotePages: scannedRemotePages,
+        useBrandOnlyCuratedFallback: useBrandOnlyCuratedFallback,
+      )) {
+        effectiveRequestQuery = effectiveRequestQuery.copyWith(
+          page: effectiveRequestQuery.page + 1,
+        );
+        scannedRemotePages += 1;
+        fetchedPage = await _fetchProductsPageForQuery(
+          _queryForRepository(
+            effectiveRequestQuery,
+            brandOnlyCuratedFallback: useBrandOnlyCuratedFallback,
+          ),
+        );
+        fetched = <ProductModel>[...fetched, ...fetchedPage.products];
+        searchedProducts = strictSearch
+            ? _applyStrictSearchFilter(fetched, effectiveRequestQuery.search)
+            : fetched;
+        effectiveFetched = _applyScopedFilters(
+          searchedProducts,
+          effectiveRequestQuery,
+        );
+
+        if (runId != _requestId || isClosed) {
+          return;
+        }
+      }
 
       final previousProducts = reset ? const <ProductModel>[] : state.products;
       final merged = _mergeUniqueProducts(previousProducts, effectiveFetched);
       final sorted = _sortProducts(merged, requestQuery.sortOption);
       final extractedAttributes = _extractAttributeOptions(merged);
-      final hasMore = fetched.length >= requestQuery.perPage;
+      final hasMore = fetchedPage.meta.hasMore;
       final status = merged.isEmpty
           ? SearchFilterStatus.empty
           : SearchFilterStatus.loaded;
@@ -521,12 +640,16 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
         state.copyWith(
           status: status,
           products: sorted,
-          query: requestQuery,
+          query: effectiveRequestQuery,
           hasMore: hasMore,
           colorOptions: extractedAttributes.$1,
           sizeOptions: extractedAttributes.$2,
           errorMessage: '',
         ),
+      );
+      _logBrandOrder(
+        'ui ids after remote=${_idsForLog(sorted)}',
+        effectiveRequestQuery,
       );
 
       if (persistRecent && requestQuery.search.trim().isNotEmpty) {
@@ -551,7 +674,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
         return;
       }
       final errorMessage = ApiContract.safeMessageFromException(e);
-      if (!reset && state.products.isNotEmpty) {
+      if (state.products.isNotEmpty) {
         _emitSafe(
           state.copyWith(
             status: SearchFilterStatus.loaded,
@@ -567,6 +690,53 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
           errorMessage: errorMessage,
         ),
       );
+    }
+  }
+
+  Future<List<ProductModel>> _loadCachedProductsForQuery(
+    ProductSearchQuery requestQuery, {
+    required bool strictSearch,
+  }) async {
+    try {
+      final repositoryQuery = _queryForRepository(
+        requestQuery,
+      ).copyWith(page: 1, perPage: _cachedWarmPerPage);
+      final rawBrandSlug = repositoryQuery.extraParams['brand_slug'];
+      final brandSlug = rawBrandSlug?.toString().trim();
+      final cached = await _repository.getCachedProducts(
+        page: 1,
+        perPage: repositoryQuery.perPage,
+        categoryId: repositoryQuery.categoryIds.isEmpty
+            ? null
+            : repositoryQuery.categoryIds.first,
+        search: repositoryQuery.search,
+        brandSlug: brandSlug == null || brandSlug.isEmpty ? null : brandSlug,
+        stock: repositoryQuery.stockStatus == 'any'
+            ? 'all'
+            : repositoryQuery.stockStatus,
+        sortBy: _cacheSortBy(repositoryQuery.sortOption),
+        guest: state.isGuest,
+      );
+      if (cached.isEmpty) {
+        return const <ProductModel>[];
+      }
+      final searched = strictSearch
+          ? _applyStrictSearchFilter(cached, requestQuery.search)
+          : cached;
+      return _applyScopedFilters(searched, requestQuery);
+    } catch (_) {
+      return const <ProductModel>[];
+    }
+  }
+
+  String _cacheSortBy(ProductSortOption option) {
+    switch (option) {
+      case ProductSortOption.defaultOrder:
+        return 'default';
+      case ProductSortOption.priceLowToHigh:
+        return 'price_asc';
+      case ProductSortOption.priceHighToLow:
+        return 'price_desc';
     }
   }
 
@@ -621,7 +791,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
 
     final terms = normalizedQuery
         .split(' ')
-        .map((term) => term.trim())
+        .map((term) => _normalizeArabic(term.trim()))
         .where((term) => term.isNotEmpty)
         .toList(growable: false);
     if (terms.isEmpty) {
@@ -671,7 +841,13 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
   }
 
   List<String> _barcodeMetaValues(ProductModel product) {
-    final values = <String>[];
+    final values = <String>[
+      product.barcode1,
+      product.barcode2,
+      product.barcode3,
+      product.barcode4,
+      ...product.barcodes,
+    ];
     for (final meta in product.metaData) {
       final key = meta.key.toLowerCase();
       if (key.contains('barcode') ||
@@ -696,7 +872,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
         .replaceAll('\u0622', '\u0627')
         .replaceAll('\u0649', '\u064A')
         .replaceAll('\u0629', '\u0647')
-        .replaceAll(RegExp(r'[^0-9a-z\u0600-\u06FF\s-]'), ' ')
+        .replaceAll(RegExp(r'[^0-9a-z\u0600-\u06FF\s\./-]'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
 
@@ -727,26 +903,70 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
         _activeCuratedCategoryLabel.isNotEmpty;
   }
 
-  ProductSearchQuery _queryForRepository(ProductSearchQuery query) {
-    if (!_hasBrandScope(query.extraParams)) {
-      return query;
-    }
-    if (!_hasCuratedSelection(query)) {
-      return query;
-    }
-
-    // Keep selected category in UI state while avoiding backend over-filtering
-    // for brand-scoped curated menus with inconsistent taxonomy mapping.
-    return query.copyWith(categoryIds: const <int>[]);
+  bool _shouldDeferCachedPreview(ProductSearchQuery query) {
+    return _hasBrandScope(query.extraParams) ||
+        query.categoryIds.any((id) => id > 0) ||
+        _hasCuratedSelection(query);
   }
 
-  Future<List<ProductModel>> _fetchProductsForQuery(
+  ProductSearchQuery _queryForRepository(
+    ProductSearchQuery query, {
+    bool brandOnlyCuratedFallback = false,
+  }) {
+    if (!brandOnlyCuratedFallback ||
+        !_hasBrandScope(query.extraParams) ||
+        !_hasCuratedSelection(query)) {
+      return query;
+    }
+
+    return query.copyWith(
+      categoryIds: const <int>[],
+      perPage: query.perPage < _brandCuratedListingPerPage
+          ? _brandCuratedListingPerPage
+          : query.perPage,
+    );
+  }
+
+  Future<CatalogProductsPage> _fetchProductsPageForQuery(
     ProductSearchQuery requestQuery,
   ) async {
-    return _repository.searchProductsWithFilters(
+    return _repository.searchProductsWithFiltersPage(
       query: requestQuery,
       guest: state.isGuest,
     );
+  }
+
+  bool _shouldTryBrandOnlyCuratedFallback(
+    List<ProductModel> effectiveFetched,
+    ProductSearchQuery query,
+  ) {
+    return effectiveFetched.isEmpty &&
+        _hasBrandScope(query.extraParams) &&
+        _hasCuratedSelection(query) &&
+        query.categoryIds.any((id) => id > 0);
+  }
+
+  bool _shouldScanMoreCuratedPages({
+    required List<ProductModel> effectiveFetched,
+    required CatalogResponseMeta meta,
+    required ProductSearchQuery requestQuery,
+    required int scannedRemotePages,
+    required bool useBrandOnlyCuratedFallback,
+  }) {
+    if (!_hasCuratedSelection(requestQuery) ||
+        !meta.hasMore ||
+        scannedRemotePages >= _maxCuratedScanPages) {
+      return false;
+    }
+
+    if (useBrandOnlyCuratedFallback) {
+      final targetCount = requestQuery.perPage > 0
+          ? requestQuery.perPage
+          : _brandCuratedListingPerPage;
+      return effectiveFetched.length < targetCount;
+    }
+
+    return effectiveFetched.isEmpty;
   }
 
   List<ProductModel> _applyScopedFilters(
@@ -758,21 +978,33 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
     }
 
     var filtered = products;
-    final normalizedBrandSlug = '${query.extraParams['brand_slug'] ?? ''}'
-        .trim()
-        .toLowerCase();
+    // Brand Filtering (Robust Normalization)
+    final rawBrandSlug = '${query.extraParams['brand_slug'] ?? ''}';
+    final normalizedBrandSlug = BrandScopedCategoryResolver.normalizeBrandKey(
+      rawBrandSlug,
+    );
+
     if (normalizedBrandSlug.isNotEmpty) {
-      filtered = filtered
+      final brandScoped = filtered
           .where((product) {
-            final productBrandSlug = product.brand?.slug.trim().toLowerCase();
-            if (productBrandSlug == null || productBrandSlug.isEmpty) {
+            final productBrandSlug =
+                BrandScopedCategoryResolver.normalizeBrandKey(
+                  product.brand?.slug ?? '',
+                );
+
+            if (productBrandSlug.isEmpty) {
+              // If product has no brand object, we let it pass through (safety fallback)
               return true;
             }
             return productBrandSlug == normalizedBrandSlug;
           })
           .toList(growable: false);
-      if (filtered.isEmpty) {
-        return filtered;
+      if (brandScoped.isNotEmpty) {
+        filtered = brandScoped;
+      } else if (kDebugMode) {
+        debugPrint(
+          'ScopedFilter brand primary slug did not match; trusting backend brand_slug scope=$normalizedBrandSlug count=${filtered.length}',
+        );
       }
     }
 
@@ -784,7 +1016,11 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
       filtered = filtered
           .where(
             (product) => product.categories.any(
-              (category) => normalizedCategoryIds.contains(category.id),
+              (category) =>
+                  normalizedCategoryIds.contains(category.id) ||
+                  _getCategoryAncestry(
+                    category.id,
+                  ).any(normalizedCategoryIds.contains),
             ),
           )
           .toList(growable: false);
@@ -819,9 +1055,11 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
           .toList(growable: false);
 
       if (byId.isNotEmpty) {
-        debugPrint(
-          '✅ ScopedFilter: Tier 1 (ID + Hierarchy) matched ${byId.length} products for ID: $targetId',
-        );
+        if (kDebugMode) {
+          debugPrint(
+            'ScopedFilter tier=id matched ${byId.length} products for id=$targetId',
+          );
+        }
         return byId;
       }
     }
@@ -851,9 +1089,11 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
           .toList(growable: false);
 
       if (bySlug.isNotEmpty) {
-        debugPrint(
-          '✅ ScopedFilter: Tier 2 (Slug + Hierarchy) matched ${bySlug.length} products for slug: $_activeCuratedCategorySlug',
-        );
+        if (kDebugMode) {
+          debugPrint(
+            'ScopedFilter tier=slug matched ${bySlug.length} products for slug=$_activeCuratedCategorySlug',
+          );
+        }
         return bySlug;
       }
     }
@@ -875,9 +1115,11 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
           )
           .toList(growable: false);
       if (byName.isNotEmpty) {
-        debugPrint(
-          '🔍 ScopedFilter: Curated filter matched ${byName.length} products by Name: $_activeCuratedCategoryLabel',
-        );
+        if (kDebugMode) {
+          debugPrint(
+            'ScopedFilter tier=category-name matched ${byName.length} products',
+          );
+        }
         return byName;
       }
     }
@@ -894,17 +1136,19 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
           .toList(growable: false);
 
       if (byProductName.isNotEmpty) {
-        debugPrint(
-          '✅ ScopedFilter: Tier 4 (Name Fallback) matched ${byProductName.length} products for label: $_activeCuratedCategoryLabel',
-        );
+        if (kDebugMode) {
+          debugPrint(
+            'ScopedFilter tier=product-name matched ${byProductName.length} products',
+          );
+        }
         return byProductName;
       }
     }
 
     // All tiers failed — curated filter is active but no products match.
     // Output deep diagnostic logs if we have products that were rejected.
-    if (filtered.isNotEmpty) {
-      debugPrint('❌ ScopedFilter: FAILED to match any Tier. FilterContext:');
+    if (filtered.isNotEmpty && kDebugMode) {
+      debugPrint('ScopedFilter failed to match any tier.');
       debugPrint('   - ActiveID: $_activeCuratedCategoryId');
       debugPrint('   - ActiveSlug: $_activeCuratedCategorySlug');
       debugPrint('   - ActiveLabel: $_activeCuratedCategoryLabel');
@@ -1158,6 +1402,25 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
       return originalA.compareTo(originalB);
     });
     return sorted;
+  }
+
+  void _logBrandOrder(String message, ProductSearchQuery query) {
+    if (!kDebugMode) {
+      return;
+    }
+    final brandSlug = '${query.extraParams['brand_slug'] ?? ''}'.trim();
+    if (brandSlug.isEmpty ||
+        query.sortOption != ProductSortOption.defaultOrder) {
+      return;
+    }
+    debugPrint('[BRAND_ORDER] $message');
+  }
+
+  String _idsForLog(List<ProductModel> products) {
+    const maxIds = 30;
+    final ids = products.take(maxIds).map((product) => product.id).toList();
+    final suffix = products.length > maxIds ? ', ...' : '';
+    return '[${ids.join(',')}$suffix]';
   }
 
   Future<String> _resolveUserScope(bool isGuest) async {

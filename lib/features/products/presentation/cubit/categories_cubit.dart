@@ -51,7 +51,7 @@ class CategoriesCubit extends Cubit<CategoriesState> {
         emit(
           state.copyWith(
             status: CategoriesStatus.loaded,
-            categories: _sortCategories(cached),
+            categories: cached,
             errorMessage: '',
           ),
         );
@@ -64,7 +64,7 @@ class CategoriesCubit extends Cubit<CategoriesState> {
       emit(
         state.copyWith(
           status: CategoriesStatus.loaded,
-          categories: _sortCategories(categories),
+          categories: categories,
           errorMessage: '',
         ),
       );
@@ -84,21 +84,4 @@ class CategoriesCubit extends Cubit<CategoriesState> {
   }
 
   Future<void> refresh() => initialize();
-
-  List<CategoryModel> _sortCategories(List<CategoryModel> categories) {
-    final sorted = <CategoryModel>[...categories];
-    sorted.sort((a, b) {
-      if (a.parentId != b.parentId) {
-        return a.parentId.compareTo(b.parentId);
-      }
-
-      final countCompare = b.count.compareTo(a.count);
-      if (countCompare != 0) {
-        return countCompare;
-      }
-
-      return a.name.compareTo(b.name);
-    });
-    return sorted;
-  }
 }

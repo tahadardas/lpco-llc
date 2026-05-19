@@ -17,6 +17,8 @@ if (!function_exists('dms_send_cache_headers')) {
             return;
         }
         $etag = '"' . md5((string) $etag_key) . '"';
+        header('Content-Type: application/json; charset=UTF-8');
+        header('X-Content-Type-Options: nosniff');
         header('Cache-Control: public, max-age=60, s-maxage=300');
         header('ETag: ' . $etag);
         if (!empty($last_modified)) {

@@ -149,39 +149,77 @@ void main() {
       },
     );
 
-    test(
-      'keeps wordpress unit labels even when current currency price is zero',
-      () {
-        final product = makeProduct(
-          unitOptions: const <UnitOption>[],
-          metaData: const <ProductMetaEntry>[
-            ProductMetaEntry(
-              key: '_dms_prices',
-              value: <String, dynamic>{
-                'A+_\$': <String, dynamic>{
-                  'syp_piece': 0,
-                  'usd_piece': 2.3,
-                  'box_unit_name': 'علبة 50 قلم',
-                  'box_pieces_count': 1,
-                  'package_unit_name': 'طرد 40 علبة',
-                  'package_pieces_count': 40,
-                },
+    test('hides wordpress units when current currency price is zero', () {
+      final product = makeProduct(
+        unitOptions: const <UnitOption>[],
+        metaData: const <ProductMetaEntry>[
+          ProductMetaEntry(
+            key: '_dms_prices',
+            value: <String, dynamic>{
+              'A+_\$': <String, dynamic>{
+                'syp_piece': 0,
+                'usd_piece': 2.3,
+                'box_unit_name': 'علبة 50 قلم',
+                'box_pieces_count': 1,
+                'package_unit_name': 'طرد 40 علبة',
+                'package_pieces_count': 40,
               },
-            ),
-          ],
-        );
+            },
+          ),
+        ],
+      );
 
-        final units = WholesaleProductUnitsResolver.resolve(
-          product: product,
-          currencyCode: 'syp',
-          userGroup: 'A+_\$',
-        );
+      final units = WholesaleProductUnitsResolver.resolve(
+        product: product,
+        currencyCode: 'syp',
+        userGroup: 'A+_\$',
+      );
 
-        expect(units.length, 2);
-        expect(units[0].label, 'علبة 50 قلم');
-        expect(units[1].label, 'طرد 40 علبة');
-      },
-    );
+      expect(units, isEmpty);
+    });
+
+    test('hides package option when its price matches piece price', () {
+      final product = makeProduct(
+        unitOptions: <UnitOption>[
+          unit(type: 'piece', sypPiece: 500, piecesCount: 1),
+          unit(type: 'package', sypPack: 500, piecesCount: 12),
+        ],
+        metaData: const <ProductMetaEntry>[],
+        piecePrice: 500,
+        packPrice: 500,
+      );
+
+      final units = WholesaleProductUnitsResolver.resolve(
+        product: product,
+        currencyCode: 'syp',
+        userGroup: 'vip',
+      );
+
+      expect(units.length, 1);
+      expect(units.first.type, 'piece');
+      expect(units.any((unit) => unit.type == 'package'), isFalse);
+    });
+
+    test('hides zero-price package option', () {
+      final product = makeProduct(
+        unitOptions: <UnitOption>[
+          unit(type: 'piece', sypPiece: 500, piecesCount: 1),
+          unit(type: 'package', sypPack: 0, piecesCount: 12),
+        ],
+        metaData: const <ProductMetaEntry>[],
+        piecePrice: 500,
+      );
+
+      final units = WholesaleProductUnitsResolver.resolve(
+        product: product,
+        currencyCode: 'syp',
+        userGroup: 'vip',
+      );
+
+      expect(units.length, 1);
+      expect(units.first.type, 'piece');
+      expect(units.any((unit) => unit.type == 'package'), isFalse);
+    });
 
     test(
       'trusts API unit_options when provided without inventing replacements',

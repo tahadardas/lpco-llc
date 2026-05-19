@@ -16,6 +16,20 @@ add_action('rest_api_init', function () {
         'permission_callback' => 'dms_permission_guest_or_auth',
     ));
 
+    register_rest_route('dms/v1', '/catalog-version', array(
+        'methods' => 'GET',
+        'callback' => 'dms_get_catalog_version',
+        'permission_callback' => '__return_true',
+    ));
+
+    register_rest_route('dms/v1', '/admin/product-diagnostics', array(
+        'methods' => 'GET',
+        'callback' => 'dms_get_product_diagnostics',
+        'permission_callback' => function () {
+            return current_user_can('manage_woocommerce');
+        },
+    ));
+
     register_rest_route('dms/v1', '/products-guest', array(
         'methods' => 'GET',
         'callback' => 'dms_get_products_guest',

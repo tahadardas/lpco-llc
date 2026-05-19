@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -48,7 +49,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     final currency = user?.currency ?? 'syp';
     final group = user?.group ?? '';
     _unitOptions = _buildUnits(widget.product, currency, group);
-    _selectedUnitType = null;
+    _selectedUnitType = _unitOptions.length == 1
+        ? _unitOptions.first.type
+        : null;
     _hydrateGalleryImagesIfNeeded();
   }
 
@@ -64,16 +67,11 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     final user = context.read<AuthCubit>().currentUser;
     final isGuest = context.read<AuthCubit>().state is! Authenticated;
     final selectedVariation = _resolveVariation(product);
-    final currentUnit =
-        _unitOptions.any((unit) => unit.type == _selectedUnitType)
-        ? _unitOptions.firstWhere((unit) => unit.type == _selectedUnitType)
-        : _unitOptions.first;
+    final currentUnit = _effectiveUnitOption;
+    final unitPrice = currentUnit?.price ?? product.basePrice;
     final price = selectedVariation != null
-        ? PriceParser.parse(
-            selectedVariation.price,
-            fallback: currentUnit.price,
-          )
-        : currentUnit.price;
+        ? PriceParser.parse(selectedVariation.price, fallback: unitPrice)
+        : unitPrice;
     final regularPrice = PriceParser.parse(product.regularPrice);
     final hasDiscount = regularPrice > price && price > 0;
     final systemBottomInset = MediaQuery.viewPaddingOf(context).bottom;
@@ -160,10 +158,12 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                       Text(
                         isGuest
                             ? 'سجل لعرض السعر'
-                            : PriceFormatter.format(
+                            : price > 0
+                            ? PriceFormatter.format(
                                 price * _quantity,
                                 currencyCode: user?.currency ?? 'syp',
-                              ),
+                              )
+                            : '\u0627\u0644\u0633\u0639\u0631 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d',
                         style: const TextStyle(
                           color: GlassStyle.fireRed,
                           fontWeight: FontWeight.w900,
@@ -237,6 +237,36 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                   },
                 ),
               ),
+              if (imageUrls.length > 1) ...[
+                PositionedDirectional(
+                  start: 10,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: _galleryNavigationButton(
+                      icon: Directionality.of(context) == TextDirection.rtl
+                          ? Icons.chevron_right_rounded
+                          : Icons.chevron_left_rounded,
+                      label: 'Previous image',
+                      onPressed: () => _moveGalleryBy(-1, imageUrls.length),
+                    ),
+                  ),
+                ),
+                PositionedDirectional(
+                  end: 10,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: _galleryNavigationButton(
+                      icon: Directionality.of(context) == TextDirection.rtl
+                          ? Icons.chevron_left_rounded
+                          : Icons.chevron_right_rounded,
+                      label: 'Next image',
+                      onPressed: () => _moveGalleryBy(1, imageUrls.length),
+                    ),
+                  ),
+                ),
+              ],
               if (imageUrls.length > 1)
                 Positioned(
                   bottom: 10,
@@ -273,11 +303,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                 final selected = activeImageIndex == index;
                 return GestureDetector(
                   onTap: () {
-                    _galleryPageController.animateToPage(
-                      index,
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                    );
+                    _animateGalleryTo(index, imageUrls.length);
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
@@ -306,6 +332,65 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _galleryNavigationButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: IconButton(
+            onPressed: onPressed,
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.white.withValues(alpha: 0.88),
+              foregroundColor: const Color(0xFF1F2937),
+              shape: const CircleBorder(),
+              elevation: 2,
+              shadowColor: const Color(0x33000000),
+            ),
+            icon: Icon(icon, size: 30),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _moveGalleryBy(int delta, int imageCount) {
+    if (imageCount <= 1) {
+      return;
+    }
+    final currentIndex = _imageIndex >= imageCount ? 0 : _imageIndex;
+    _animateGalleryTo(currentIndex + delta, imageCount);
+  }
+
+  void _animateGalleryTo(int rawIndex, int imageCount) {
+    if (imageCount <= 0) {
+      return;
+    }
+
+    var targetIndex = rawIndex % imageCount;
+    if (targetIndex < 0) {
+      targetIndex += imageCount;
+    }
+
+    if (!_galleryPageController.hasClients) {
+      setState(() => _imageIndex = targetIndex);
+      return;
+    }
+
+    _galleryPageController.animateToPage(
+      targetIndex,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
     );
   }
 
@@ -342,9 +427,11 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     final isGuest = authState is! Authenticated;
 
     try {
-      final products = await _productRepository.getProductsByIds(<int>[
-        widget.product.id,
-      ], guest: isGuest);
+      final products = await _productRepository.getProductsByIds(
+        <int>[widget.product.id],
+        guest: isGuest,
+        includeGallery: true,
+      );
       if (products.isEmpty || !mounted) {
         return;
       }
@@ -542,7 +629,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               'سجل لعرض السعر',
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
             )
-          else ...[
+          else if (price > 0) ...[
             if (hasDiscount)
               Text(
                 PriceFormatter.format(regularPrice, currencyCode: currency),
@@ -561,7 +648,15 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                 height: 1,
               ),
             ),
-          ],
+          ] else
+            const Text(
+              '\u0627\u0644\u0633\u0639\u0631 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d',
+              style: TextStyle(
+                color: Color(0xFF6F7786),
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
           const SizedBox(height: 4),
           Wrap(
             spacing: 8,
@@ -742,17 +837,33 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             onTap: _quantity > 1 ? () => setState(() => _quantity--) : null,
           ),
           const SizedBox(width: 8),
-          Container(
-            width: 52,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF2F4F8),
+          Tooltip(
+            message:
+                '\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0643\u0645\u064a\u0629',
+            child: Material(
+              color: Colors.transparent,
               borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '$_quantity',
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+              child: InkWell(
+                key: const ValueKey<String>('product_details_quantity_button'),
+                onTap: _editQuantity,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: 52,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF2F4F8),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$_quantity',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 20,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -816,6 +927,25 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     );
   }
 
+  Future<void> _editQuantity() async {
+    final unitLabel = _effectiveUnitOption?.label.trim();
+    final quantity = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) {
+        return _QuantityInputDialog(
+          initialQuantity: _quantity,
+          unitLabel: unitLabel == null || unitLabel.isEmpty ? null : unitLabel,
+        );
+      },
+    );
+
+    if (!mounted || quantity == null) {
+      return;
+    }
+
+    setState(() => _quantity = quantity);
+  }
+
   ProductVariation? _resolveVariation(ProductModel product) {
     if (product.variations.isEmpty || _selectedAttributes.isEmpty) {
       return null;
@@ -842,17 +972,28 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     return null;
   }
 
+  _UnitOption? get _selectedUnitOption {
+    final selectedType = _selectedUnitType;
+    if (selectedType == null) {
+      return null;
+    }
+    for (final unit in _unitOptions) {
+      if (unit.type == selectedType) {
+        return unit;
+      }
+    }
+    return null;
+  }
+
+  _UnitOption? get _effectiveUnitOption {
+    return _selectedUnitOption ??
+        (_unitOptions.length == 1 ? _unitOptions.first : null);
+  }
+
   bool get _canAddToCart {
     if (!widget.product.inStock) return false;
 
-    if (_selectedUnitType == null) return false;
-    _UnitOption? selectedUnit;
-    for (final unit in _unitOptions) {
-      if (unit.type == _selectedUnitType) {
-        selectedUnit = unit;
-        break;
-      }
-    }
+    final selectedUnit = _effectiveUnitOption;
     if (selectedUnit == null || selectedUnit.price <= 0) return false;
     if (widget.product.colorOptions.isNotEmpty && _selectedColorSlug == null) {
       return false;
@@ -878,18 +1019,8 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       return;
     }
 
-    if (_selectedUnitType == null) {
-      return;
-    }
-
     final variation = _resolveVariation(widget.product);
-    _UnitOption? unit;
-    for (final candidate in _unitOptions) {
-      if (candidate.type == _selectedUnitType) {
-        unit = candidate;
-        break;
-      }
-    }
+    final unit = _effectiveUnitOption;
     if (unit == null) {
       return;
     }
@@ -961,7 +1092,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       return a.label.compareTo(b.label);
     });
 
-    if (units.isEmpty) {
+    if (units.isEmpty && product.basePrice > 0) {
       units.add(
         _UnitOption(
           type: 'piece',
@@ -1007,6 +1138,101 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
         ? product.shortDescription
         : product.description;
     return _stripHtml(raw);
+  }
+}
+
+class _QuantityInputDialog extends StatefulWidget {
+  final int initialQuantity;
+  final String? unitLabel;
+
+  const _QuantityInputDialog({
+    required this.initialQuantity,
+    required this.unitLabel,
+  });
+
+  @override
+  State<_QuantityInputDialog> createState() => _QuantityInputDialogState();
+}
+
+class _QuantityInputDialogState extends State<_QuantityInputDialog> {
+  late final TextEditingController _controller;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: '${widget.initialQuantity}');
+    _controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _controller.text.length,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text(
+        '\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0643\u0645\u064a\u0629',
+      ),
+      content: TextField(
+        key: const ValueKey<String>('product_details_quantity_input'),
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.center,
+        textInputAction: TextInputAction.done,
+        inputFormatters: <TextInputFormatter>[
+          FilteringTextInputFormatter.digitsOnly,
+        ],
+        decoration: InputDecoration(
+          labelText: '\u0627\u0644\u0643\u0645\u064a\u0629',
+          suffixText: widget.unitLabel,
+          errorText: _errorText,
+        ),
+        onChanged: (_) {
+          if (_errorText != null) {
+            setState(() => _errorText = null);
+          }
+        },
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('\u0625\u0644\u063a\u0627\u0621'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('\u062a\u062d\u062f\u064a\u062b'),
+        ),
+      ],
+    );
+  }
+
+  void _submit() {
+    final parsed = _parseQuantityInput(_controller.text);
+    if (parsed == null) {
+      setState(() {
+        _errorText =
+            '\u0623\u062f\u062e\u0644 \u0643\u0645\u064a\u0629 \u0635\u062d\u064a\u062d\u0629';
+      });
+      return;
+    }
+    Navigator.of(context).pop(parsed);
+  }
+
+  int? _parseQuantityInput(String raw) {
+    final parsed = int.tryParse(raw.trim());
+    if (parsed == null || parsed <= 0) {
+      return null;
+    }
+    return parsed > 999999 ? 999999 : parsed;
   }
 }
 

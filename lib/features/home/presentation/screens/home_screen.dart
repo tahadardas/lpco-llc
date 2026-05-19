@@ -749,28 +749,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<CategoryModel> _mainCategoriesForHome(List<CategoryModel> categories) {
-    final main = categories
+    return categories
         .where((category) => category.parentId <= 0)
         .toList(growable: false);
-    final sorted = <CategoryModel>[...main];
-    sorted.sort((a, b) {
-      // 1. Featured first
-      if (a.isFeatured != b.isFeatured) {
-        return a.isFeatured ? -1 : 1;
-      }
-      // 2. Menu order
-      if (a.menuOrder != b.menuOrder) {
-        return a.menuOrder.compareTo(b.menuOrder);
-      }
-      // 3. Product count
-      final countCompare = b.count.compareTo(a.count);
-      if (countCompare != 0) {
-        return countCompare;
-      }
-      // 4. Alphabetical
-      return a.name.compareTo(b.name);
-    });
-    return sorted;
   }
 
   Widget _quickBrands(ProductState state) {

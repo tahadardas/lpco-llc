@@ -414,10 +414,22 @@ class AppSideDrawer extends StatelessWidget {
         onTap: () {
           final router = GoRouter.of(context);
           _closeMenu(context);
+          if (selected) {
+            return;
+          }
+          if (_opensAsStackPage(route)) {
+            router.push(route);
+            return;
+          }
           router.go(route);
         },
       ),
     );
+  }
+
+  bool _opensAsStackPage(String route) {
+    return route == AppRoutePaths.notifications ||
+        route == AppRoutePaths.contact;
   }
 
   Widget _drawerIcon({

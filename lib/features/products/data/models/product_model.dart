@@ -248,6 +248,11 @@ class ProductModel {
   final String name;
   final String slug;
   final String sku;
+  final String barcode1;
+  final String barcode2;
+  final String barcode3;
+  final String barcode4;
+  final List<String> barcodes;
   final String description;
   final String shortDescription;
   final String permalink;
@@ -279,6 +284,11 @@ class ProductModel {
     required this.name,
     required this.slug,
     required this.sku,
+    this.barcode1 = '',
+    this.barcode2 = '',
+    this.barcode3 = '',
+    this.barcode4 = '',
+    this.barcodes = const <String>[],
     required this.description,
     required this.shortDescription,
     required this.permalink,
@@ -313,6 +323,25 @@ class ProductModel {
           .map((img) => ProductImage.fromJson(Map<String, dynamic>.from(img)))
           .where((img) => img.src.isNotEmpty)
           .toList();
+    }
+    final primaryImageUrl = TextSanitizer.fix(json['image_url']).trim();
+    if (primaryImageUrl.isNotEmpty) {
+      final existingIndex = imageUrls.indexWhere(
+        (image) => image.src == primaryImageUrl,
+      );
+      if (existingIndex < 0) {
+        imageUrls = <ProductImage>[
+          ProductImage(id: 0, src: primaryImageUrl),
+          ...imageUrls,
+        ];
+      } else if (existingIndex > 0) {
+        final primary = imageUrls[existingIndex];
+        imageUrls = <ProductImage>[
+          primary,
+          for (var i = 0; i < imageUrls.length; i++)
+            if (i != existingIndex) imageUrls[i],
+        ];
+      }
     }
 
     List<ProductVariation> parsedVariations = <ProductVariation>[];
@@ -368,6 +397,17 @@ class ProductModel {
           .toList();
     }
 
+    final parsedBarcode1 = TextSanitizer.fix(json['barcode_1']);
+    final parsedBarcode2 = TextSanitizer.fix(json['barcode_2']);
+    final parsedBarcode3 = TextSanitizer.fix(json['barcode_3']);
+    final parsedBarcode4 = TextSanitizer.fix(json['barcode_4']);
+    final parsedBarcodes = _parseProductBarcodes(json, parsedMetaData, <String>[
+      parsedBarcode1,
+      parsedBarcode2,
+      parsedBarcode3,
+      parsedBarcode4,
+    ]);
+
     List<UnitOption> parsedUnitOptions = <UnitOption>[];
     if (json['unit_options'] is List) {
       parsedUnitOptions = (json['unit_options'] as List)
@@ -400,6 +440,11 @@ class ProductModel {
       name: TextSanitizer.fix(json['name']),
       slug: TextSanitizer.fix(json['slug']),
       sku: TextSanitizer.fix(json['sku']),
+      barcode1: parsedBarcode1,
+      barcode2: parsedBarcode2,
+      barcode3: parsedBarcode3,
+      barcode4: parsedBarcode4,
+      barcodes: parsedBarcodes,
       description: TextSanitizer.fix(json['description']),
       shortDescription: TextSanitizer.fix(json['short_description']),
       permalink: TextSanitizer.fix(json['permalink']),
@@ -449,4 +494,43 @@ class ProductModel {
         normalized == 'yes' ||
         normalized == 'featured';
   }
+}
+
+List<String> _parseProductBarcodes(
+  Map<String, dynamic> json,
+  List<ProductMetaEntry> metaData,
+  List<String> directValues,
+) {
+  final seen = <String>{};
+  final values = <String>[];
+
+  void add(dynamic raw) {
+    final value = TextSanitizer.fix(raw).trim();
+    if (value.isEmpty) return;
+    final key = value.toLowerCase();
+    if (seen.add(key)) {
+      values.add(value);
+    }
+  }
+
+  for (final value in directValues) {
+    add(value);
+  }
+
+  final rawBarcodes = json['barcodes'];
+  if (rawBarcodes is List) {
+    for (final value in rawBarcodes) {
+      add(value);
+    }
+  }
+  add(json['barcode']);
+
+  for (final meta in metaData) {
+    final key = meta.key.toLowerCase();
+    if (key.contains('barcode') || key == 'ean' || key == 'upc') {
+      add(meta.value);
+    }
+  }
+
+  return values;
 }

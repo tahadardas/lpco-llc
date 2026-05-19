@@ -93,8 +93,16 @@ class WholesaleProductUnitsResolver {
       }
 
       if (units.isNotEmpty) {
-        // API `unit_options` are the authoritative source for unit labels.
-        return units;
+        // API `unit_options` are authoritative for present units; metadata may
+        // still complete a missing package unit from the pricing matrix.
+        _appendMetaUnitsIfNeeded(
+          units: units,
+          seenTypes: seenTypes,
+          scopedPrices: scopedPrices,
+          product: product,
+          normalizedCurrency: normalizedCurrency,
+        );
+        return _normalizeVisibleUnits(units);
       }
     }
 
@@ -108,17 +116,19 @@ class WholesaleProductUnitsResolver {
 
     if (units.isEmpty) {
       final fallbackPrice = PriceParser.parse(product.price, fallback: 0);
-      units.add(
-        ResolvedProductUnit(
-          type: 'piece',
-          label: _defaultLabelForType('piece'),
-          price: fallbackPrice,
-          piecesCount: 1,
-        ),
-      );
+      if (fallbackPrice > 0) {
+        units.add(
+          ResolvedProductUnit(
+            type: 'piece',
+            label: _defaultLabelForType('piece'),
+            price: fallbackPrice,
+            piecesCount: 1,
+          ),
+        );
+      }
     }
 
-    return units;
+    return _normalizeVisibleUnits(units);
   }
 
   static num? resolveExpectedUnitPrice({
@@ -156,6 +166,40 @@ class WholesaleProductUnitsResolver {
 
     return null;
   }
+}
+
+List<ResolvedProductUnit> _normalizeVisibleUnits(
+  List<ResolvedProductUnit> units,
+) {
+  final positiveUnits = units
+      .where((unit) => unit.price > 0)
+      .toList(growable: false);
+  if (positiveUnits.length <= 1) {
+    return positiveUnits;
+  }
+
+  final piecePrices = positiveUnits
+      .where((unit) => _canonicalUnitType(unit.type) == 'piece')
+      .map((unit) => unit.price)
+      .toList(growable: false);
+  if (piecePrices.isEmpty) {
+    return positiveUnits;
+  }
+
+  return positiveUnits
+      .where((unit) {
+        if (_canonicalUnitType(unit.type) != 'package') {
+          return true;
+        }
+        return !piecePrices.any(
+          (piecePrice) => _pricesEqual(piecePrice, unit.price),
+        );
+      })
+      .toList(growable: false);
+}
+
+bool _pricesEqual(num first, num second) {
+  return (first.toDouble() - second.toDouble()).abs() < 0.000001;
 }
 
 String _canonicalUnitType(String type) {
@@ -216,6 +260,9 @@ num _priceFromScopedMap({
 num _fallbackProductPrice(ProductModel product, bool isPackage) {
   if (isPackage && product.pricePerPack > 0) {
     return product.pricePerPack;
+  }
+  if (isPackage) {
+    return 0;
   }
   if (!isPackage && product.pricePerPiece > 0) {
     return product.pricePerPiece;

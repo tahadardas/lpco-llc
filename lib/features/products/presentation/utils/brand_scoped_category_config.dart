@@ -65,7 +65,6 @@ const List<String> _zidnyBrandAliases = <String>[
   'zidny',
   'زدني',
   'زيدني',
-  'alameer-alsagheer',
 ];
 
 class LocalBrandScopedCategoryMenuSource extends BrandScopedCategoryMenuSource {

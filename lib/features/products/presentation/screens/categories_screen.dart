@@ -22,19 +22,7 @@ Map<int, List<CategoryModel>> _buildChildrenMap(
     map.putIfAbsent(category.parentId, () => <CategoryModel>[]).add(category);
   }
 
-  for (final entry in map.entries) {
-    entry.value.sort(_sortCategories);
-  }
-
   return map;
-}
-
-int _sortCategories(CategoryModel a, CategoryModel b) {
-  final countCompare = b.count.compareTo(a.count);
-  if (countCompare != 0) {
-    return countCompare;
-  }
-  return a.name.compareTo(b.name);
 }
 
 class CategoriesScreen extends StatelessWidget {
@@ -127,9 +115,9 @@ class _CategoriesViewState extends State<_CategoriesView> {
           }
 
           final categories = state.categories;
-          final mainCategories =
-              categories.where((c) => c.parentId <= 0).toList()
-                ..sort(_sortCategories);
+          final mainCategories = categories
+              .where((c) => c.parentId <= 0)
+              .toList();
           final childrenMap = _buildChildrenMap(categories);
 
           return RefreshIndicator(

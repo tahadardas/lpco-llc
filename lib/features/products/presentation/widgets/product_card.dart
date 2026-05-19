@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter/services.dart';
 
 import 'package:lpco_llc/core/utils/formatters.dart';
 import 'package:lpco_llc/core/utils/price_parser.dart';
@@ -60,7 +61,17 @@ class _ProductCardState extends State<ProductCard> {
   bool _pressed = false;
   int _imageIndex = 0;
 
-  ProductCardUnit get _fallbackUnit => _units.first;
+  ProductCardUnit get _fallbackUnit {
+    if (_units.isNotEmpty) {
+      return _units.first;
+    }
+    return const ProductCardUnit(
+      type: 'piece',
+      label: '\u0642\u0637\u0639\u0629',
+      price: 0,
+      piecesCount: 1,
+    );
+  }
 
   ProductCardUnit? get _selectedUnit {
     final type = _selectedUnitType;
@@ -150,7 +161,7 @@ class _ProductCardState extends State<ProductCard> {
       return a.label.compareTo(b.label);
     });
 
-    if (_units.isEmpty) {
+    if (_units.isEmpty && widget.product.basePrice > 0) {
       _units = <ProductCardUnit>[
         ProductCardUnit(
           type: 'piece',
@@ -374,7 +385,7 @@ class _ProductCardState extends State<ProductCard> {
                     fontSize: 11,
                   ),
                 )
-              else ...<Widget>[
+              else if (selectedPrice > 0) ...<Widget>[
                 if (hasDiscount)
                   Text(
                     PriceFormatter.format(
@@ -404,7 +415,15 @@ class _ProductCardState extends State<ProductCard> {
                     height: 1,
                   ),
                 ),
-              ],
+              ] else
+                const Text(
+                  '\u0627\u0644\u0633\u0639\u0631 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d',
+                  style: TextStyle(
+                    color: Color(0xFF596172),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
             ],
           ),
         ),
@@ -484,13 +503,31 @@ class _ProductCardState extends State<ProductCard> {
             roundedSide: 'left',
           ),
           Expanded(
-            child: Center(
-              child: Text(
-                '$quantity',
-                style: const TextStyle(
-                  color: Color(0xFF1A1A1A),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
+            child: Tooltip(
+              message:
+                  '\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0643\u0645\u064a\u0629',
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: const ValueKey<String>('product_card_quantity_button'),
+                  onTap: () => _editSelectedQuantity(quantity),
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '$quantity',
+                          maxLines: 1,
+                          style: const TextStyle(
+                            color: Color(0xFF1A1A1A),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -591,6 +628,100 @@ class _ProductCardState extends State<ProductCard> {
       return;
     }
     await context.read<CartCubit>().decrementItem(_itemKeyForUnit(unit));
+  }
+
+  Future<void> _editSelectedQuantity(int currentQuantity) async {
+    final unit = _effectiveUnitForActions;
+    if (unit == null) {
+      return;
+    }
+
+    final controller = TextEditingController(text: '$currentQuantity');
+    controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: controller.text.length,
+    );
+    String? errorText;
+
+    try {
+      final quantity = await showDialog<int>(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              void submit() {
+                final parsed = _parseQuantityInput(controller.text);
+                if (parsed == null) {
+                  setDialogState(() {
+                    errorText =
+                        '\u0623\u062f\u062e\u0644 \u0643\u0645\u064a\u0629 \u0635\u062d\u064a\u062d\u0629';
+                  });
+                  return;
+                }
+                Navigator.of(dialogContext).pop(parsed);
+              }
+
+              return AlertDialog(
+                title: const Text(
+                  '\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0643\u0645\u064a\u0629',
+                ),
+                content: TextField(
+                  key: const ValueKey<String>('product_card_quantity_input'),
+                  controller: controller,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  textInputAction: TextInputAction.done,
+                  inputFormatters: <TextInputFormatter>[
+                    FilteringTextInputFormatter.digitsOnly,
+                  ],
+                  decoration: InputDecoration(
+                    labelText: '\u0627\u0644\u0643\u0645\u064a\u0629',
+                    suffixText: unit.label,
+                    errorText: errorText,
+                  ),
+                  onChanged: (_) {
+                    if (errorText != null) {
+                      setDialogState(() => errorText = null);
+                    }
+                  },
+                  onSubmitted: (_) => submit(),
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('\u0625\u0644\u063a\u0627\u0621'),
+                  ),
+                  FilledButton(
+                    onPressed: submit,
+                    child: const Text('\u062a\u062d\u062f\u064a\u062b'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+
+      if (!mounted || quantity == null) {
+        return;
+      }
+
+      await context.read<CartCubit>().updateQuantity(
+        _itemKeyForUnit(unit),
+        quantity,
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  int? _parseQuantityInput(String raw) {
+    final parsed = int.tryParse(raw.trim());
+    if (parsed == null || parsed <= 0) {
+      return null;
+    }
+    return parsed > 999999 ? 999999 : parsed;
   }
 
   VoidCallback? _resolveGridPrimaryAction() {
@@ -715,6 +846,9 @@ class _ProductCardState extends State<ProductCard> {
     return PageView.builder(
       key: ValueKey<int>(widget.product.id),
       itemCount: imageUrls.length,
+      allowImplicitScrolling: true,
+      clipBehavior: Clip.hardEdge,
+      physics: const PageScrollPhysics(),
       onPageChanged: (value) {
         if (_imageIndex != value && mounted) {
           setState(() => _imageIndex = value);
