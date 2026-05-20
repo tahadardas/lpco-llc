@@ -937,9 +937,8 @@ class _OrderingSection<T> extends StatelessWidget {
           ReorderableListView(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            onReorder: (oldIndex, newIndex) {
+            onReorderItem: (oldIndex, newIndex) {
               final next = [...selectedIds];
-              if (newIndex > oldIndex) newIndex -= 1;
               final item = next.removeAt(oldIndex);
               next.insert(newIndex, item);
               onChanged(next);
