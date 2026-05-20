@@ -22,6 +22,10 @@ import 'package:lpco_llc/features/cart/presentation/cubit/cart_cubit.dart';
 import 'package:lpco_llc/features/notifications/presentation/cubit/notifications_badge_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/firebase_options.dart';
+import 'package:lpco_llc/features/legal/data/legal_consent_service.dart';
+import 'package:lpco_llc/features/legal/presentation/screens/legal_consent_screen.dart';
+import 'package:lpco_llc/features/legal/presentation/screens/privacy_policy_screen.dart';
+import 'package:lpco_llc/features/legal/presentation/screens/terms_of_use_screen.dart';
 
 Future<void> _configureCrashlytics() async {
   bool isTransientWebInsetsError(Object error) {
@@ -104,11 +108,14 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
   final NotificationsBadgeCubit _notificationsBadgeCubit =
       NotificationsBadgeCubit();
   bool _runtimeBootstrapStarted = false;
+  bool _hasAcceptedConsent = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    _hasAcceptedConsent = LegalConsentService().hasAcceptedCurrentVersion();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_bootstrapRuntimeServices());
@@ -251,6 +258,34 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
               );
             }
 
+            Widget? consentLayer;
+            if (!_hasAcceptedConsent) {
+              consentLayer = _FullScreenLockNavigator(
+                child: LegalConsentScreen(
+                  onAccepted: () async {
+                    await LegalConsentService().acceptCurrentVersion();
+                    setState(() {
+                      _hasAcceptedConsent = true;
+                    });
+                  },
+                  onOpenPrivacyPolicy: (ctx) {
+                    Navigator.of(ctx).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PrivacyPolicyScreen(),
+                      ),
+                    );
+                  },
+                  onOpenTermsOfUse: (ctx) {
+                    Navigator.of(ctx).push(
+                      MaterialPageRoute(
+                        builder: (_) => const TermsOfUseScreen(),
+                      ),
+                    );
+                  },
+                ),
+              );
+            }
+
             final wrapped = NetworkBannerWrapper(
               child: Directionality(
                 textDirection: TextDirection.rtl,
@@ -259,6 +294,7 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
                   children: <Widget>[
                     appChild,
                     if (lockLayer != null) Positioned.fill(child: lockLayer),
+                    if (consentLayer != null) Positioned.fill(child: consentLayer),
                   ],
                 ),
               ),

@@ -22,6 +22,15 @@ Map<int, List<CategoryModel>> _buildChildrenMap(
     map.putIfAbsent(category.parentId, () => <CategoryModel>[]).add(category);
   }
 
+  for (final entry in map.entries) {
+    entry.value.sort((a, b) {
+      if (a.menuOrder != b.menuOrder) {
+        return a.menuOrder.compareTo(b.menuOrder);
+      }
+      return a.name.compareTo(b.name);
+    });
+  }
+
   return map;
 }
 
@@ -117,7 +126,13 @@ class _CategoriesViewState extends State<_CategoriesView> {
           final categories = state.categories;
           final mainCategories = categories
               .where((c) => c.parentId <= 0)
-              .toList();
+              .toList()
+              ..sort((a, b) {
+                if (a.menuOrder != b.menuOrder) {
+                  return a.menuOrder.compareTo(b.menuOrder);
+                }
+                return a.name.compareTo(b.name);
+              });
           final childrenMap = _buildChildrenMap(categories);
 
           return RefreshIndicator(

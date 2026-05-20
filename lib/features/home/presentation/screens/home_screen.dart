@@ -584,53 +584,75 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<_HeroSlideData> _buildHeroSlides(ProductState state) {
     final slides = <_HeroSlideData>[];
-    final bannerImage = state.homeBannerImageUrl.trim();
-    final bannerTitle = state.homeBannerTitle.trim();
-    final bannerSubtitle = state.homeBannerSubtitle.trim();
-    final bannerButtonLabel = state.homeBannerButtonLabel.trim();
-    final bannerLink = state.homeBannerButtonLink.trim();
 
-    if (state.homeBannerEnabled &&
-        (bannerImage.isNotEmpty ||
-            bannerTitle.isNotEmpty ||
-            bannerSubtitle.isNotEmpty ||
-            state.products.isEmpty)) {
+    final banners = state.homeBanners.where((b) => b.enabled).take(30).toList();
+    for (final banner in banners) {
       slides.add(
         _HeroSlideData(
-          imageUrl: bannerImage,
-          title: bannerTitle.isNotEmpty ? bannerTitle : 'عروض المتجر الكبرى',
-          subtitle: bannerSubtitle.isNotEmpty
-              ? bannerSubtitle
+          imageUrl: banner.imageUrl,
+          title: banner.title.isNotEmpty ? banner.title : 'عروض المتجر الكبرى',
+          subtitle: banner.subtitle.isNotEmpty
+              ? banner.subtitle
               : 'تحديثات يومية للمنتجات والعروض',
-          ctaLabel: bannerButtonLabel.isNotEmpty
-              ? bannerButtonLabel
+          ctaLabel: banner.buttonLabel.isNotEmpty
+              ? banner.buttonLabel
               : 'تسوق الآن',
-          onTap: () => _openHeroLink(bannerLink),
+          onTap: () => _openHeroLink(banner.buttonLink),
         ),
       );
     }
 
-    // 2. Banner Products (Dynamic/Manual)
-    final List<ProductModel> productsToShow = state.bannerProducts.isNotEmpty
-        ? state.bannerProducts
-        : state.products.where((product) => product.inStock).take(4).toList();
+    if (slides.isEmpty) {
+      final bannerImage = state.homeBannerImageUrl.trim();
+      final bannerTitle = state.homeBannerTitle.trim();
+      final bannerSubtitle = state.homeBannerSubtitle.trim();
+      final bannerButtonLabel = state.homeBannerButtonLabel.trim();
+      final bannerLink = state.homeBannerButtonLink.trim();
 
-    for (final product in productsToShow) {
-      final categoryName = product.categories.isNotEmpty
-          ? product.categories.first.name
-          : 'منتج مميز';
-      slides.add(
-        _HeroSlideData(
-          imageUrl: product.firstImage,
-          title: product.name,
-          subtitle: categoryName,
-          ctaLabel: 'عرض المنتج',
-          onTap: () => context.push(
-            AppRoutePaths.productUrl(product.id),
-            extra: product,
+      if (state.homeBannerEnabled &&
+          (bannerImage.isNotEmpty ||
+              bannerTitle.isNotEmpty ||
+              bannerSubtitle.isNotEmpty ||
+              state.products.isEmpty)) {
+        slides.add(
+          _HeroSlideData(
+            imageUrl: bannerImage,
+            title: bannerTitle.isNotEmpty ? bannerTitle : 'عروض المتجر الكبرى',
+            subtitle: bannerSubtitle.isNotEmpty
+                ? bannerSubtitle
+                : 'تحديثات يومية للمنتجات والعروض',
+            ctaLabel: bannerButtonLabel.isNotEmpty
+                ? bannerButtonLabel
+                : 'تسوق الآن',
+            onTap: () => _openHeroLink(bannerLink),
           ),
-        ),
-      );
+        );
+      }
+    }
+
+    // 2. Banner Products (Dynamic/Manual)
+    if (slides.isEmpty) {
+      final List<ProductModel> productsToShow = state.bannerProducts.isNotEmpty
+          ? state.bannerProducts
+          : state.products.where((product) => product.inStock).take(4).toList();
+
+      for (final product in productsToShow) {
+        final categoryName = product.categories.isNotEmpty
+            ? product.categories.first.name
+            : 'منتج مميز';
+        slides.add(
+          _HeroSlideData(
+            imageUrl: product.firstImage,
+            title: product.name,
+            subtitle: categoryName,
+            ctaLabel: 'عرض المنتج',
+            onTap: () => context.push(
+              AppRoutePaths.productUrl(product.id),
+              extra: product,
+            ),
+          ),
+        );
+      }
     }
 
     if (slides.isEmpty) {
@@ -662,6 +684,39 @@ class _HomeScreenState extends State<HomeScreen> {
         context.push(AppRoutePaths.productUrl(id));
         return;
       }
+    } else if (lower.startsWith('category:')) {
+      final id = int.tryParse(lower.replaceFirst('category:', ''));
+      if (id != null) {
+        context.push(AppRoutePaths.categoryUrl(id));
+        return;
+      }
+    } else if (lower.startsWith('brand:')) {
+      final slug = lower.replaceFirst('brand:', '').trim();
+      if (slug.isNotEmpty) {
+        context.push(AppRoutePaths.brandUrl(slug));
+        return;
+      }
+    } else if (lower.startsWith('search:')) {
+      final term = lower.replaceFirst('search:', '').trim();
+      if (term.isNotEmpty) {
+        context.push(AppRoutePaths.searchUrl(query: term));
+        return;
+      }
+    } else if (lower == 'catalog') {
+      context.push(AppRoutePaths.catalog);
+      return;
+    } else if (lower == 'categories') {
+      context.push(AppRoutePaths.categories);
+      return;
+    } else if (lower == 'brands') {
+      context.push(AppRoutePaths.brands);
+      return;
+    } else if (lower == 'cart') {
+      context.push(AppRoutePaths.cart);
+      return;
+    } else if (lower == 'account') {
+      context.push(AppRoutePaths.account);
+      return;
     }
 
     if (lower.startsWith('http://') || lower.startsWith('https://')) {

@@ -41,6 +41,7 @@ class ProductState {
   final List<int> bannerProductIds;
   final bool initialSyncDone;
   final bool useActiveProductIndex;
+  final List<HomeBannerSlideData> homeBanners;
 
   const ProductState({
     this.status = ProductStatus.initial,
@@ -69,6 +70,7 @@ class ProductState {
     this.bannerProductIds = const [],
     this.initialSyncDone = false,
     this.useActiveProductIndex = false,
+    this.homeBanners = const <HomeBannerSlideData>[],
   });
 
   ProductState copyWith({
@@ -100,6 +102,7 @@ class ProductState {
     List<int>? bannerProductIds,
     bool? initialSyncDone,
     bool? useActiveProductIndex,
+    List<HomeBannerSlideData>? homeBanners,
   }) {
     return ProductState(
       status: status ?? this.status,
@@ -134,6 +137,7 @@ class ProductState {
       initialSyncDone: initialSyncDone ?? this.initialSyncDone,
       useActiveProductIndex:
           useActiveProductIndex ?? this.useActiveProductIndex,
+      homeBanners: homeBanners ?? this.homeBanners,
     );
   }
 }
@@ -165,7 +169,7 @@ class ProductCubit extends Cubit<ProductState> {
     );
   }
 
-  Future<void> initialize() async {
+  Future<void> initialize({bool forceRefresh = false}) async {
     if (_isSyncing) return;
     _isSyncing = true;
 
@@ -180,7 +184,7 @@ class ProductCubit extends Cubit<ProductState> {
       );
     } catch (_) {}
 
-    if (!catalogRevisionChanged) {
+    if (!catalogRevisionChanged && !forceRefresh) {
       try {
         final results = await Future.wait([
           _repository.getCachedProducts(
@@ -196,12 +200,14 @@ class ProductCubit extends Cubit<ProductState> {
           _repository.getCachedCategories(guest: state.isGuest),
           _repository.getCachedBrands(guest: state.isGuest),
           _repository.getCachedHomeBannerData(guest: state.isGuest),
+          _repository.getCachedHomeBannersData(guest: state.isGuest),
         ]);
 
         final cachedProducts = results[0] as List<ProductModel>;
         final cachedCategories = results[1] as List<CategoryModel>;
         final cachedBrands = results[2] as List<BrandModel>;
         final cachedBanner = results[3] as HomeBannerData;
+        final cachedBannersList = results[4] as List<HomeBannerSlideData>;
 
         if (cachedProducts.isNotEmpty || cachedCategories.isNotEmpty) {
           _logBrandOrder(
@@ -224,6 +230,7 @@ class ProductCubit extends Cubit<ProductState> {
               homeBannerEnabled: cachedBanner.enabled,
               bannerProductIds: cachedBanner.productIds,
               useActiveProductIndex: true,
+              homeBanners: cachedBannersList,
             ),
           );
         } else {
@@ -255,17 +262,20 @@ class ProductCubit extends Cubit<ProductState> {
         orderBy: _mapOrderBy(state.sortBy),
         order: _mapOrder(state.sortBy),
         guest: state.isGuest,
+        forceRefresh: forceRefresh,
       );
       final results = await Future.wait([
         productsPageFuture,
-        _repository.getCategories(guest: state.isGuest),
-        _repository.getBrands(guest: state.isGuest),
-        _repository.getHomeBannerData(guest: state.isGuest),
+        _repository.getCategories(guest: state.isGuest, forceRefresh: forceRefresh),
+        _repository.getBrands(guest: state.isGuest, forceRefresh: forceRefresh),
+        _repository.getHomeBannerData(guest: state.isGuest, forceRefresh: forceRefresh),
+        _repository.getHomeBannersData(guest: state.isGuest, forceRefresh: forceRefresh),
       ]);
 
       final productsPage = results[0] as CatalogProductsPage;
       final remoteProducts = productsPage.products;
       final bannerData = results[3] as HomeBannerData;
+      final remoteBannersList = results[4] as List<HomeBannerSlideData>;
       _logBrandOrder(
         'remote ids=${_idsForLog(remoteProducts)}',
         brandSlug: state.selectedBrandSlug,
@@ -307,6 +317,7 @@ class ProductCubit extends Cubit<ProductState> {
           bannerProductIds: bannerData.productIds,
           initialSyncDone: true,
           useActiveProductIndex: true,
+          homeBanners: remoteBannersList,
         ),
       );
       _logBrandOrder(
@@ -419,7 +430,7 @@ class ProductCubit extends Cubit<ProductState> {
     emit(
       state.copyWith(
         page: 1,
-        products: const <ProductModel>[],
+        // Retain existing products to prevent UI flash
         status: ProductStatus.loading,
         initialSyncDone: false,
       ),
@@ -427,7 +438,7 @@ class ProductCubit extends Cubit<ProductState> {
     if (forceRemote) {
       await _repository.syncCatalogRevision(guest: state.isGuest);
     }
-    await initialize();
+    await initialize(forceRefresh: forceRemote);
   }
 
   bool isSaved(int productId) => state.savedProductIds.contains(productId);

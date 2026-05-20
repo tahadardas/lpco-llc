@@ -65,6 +65,40 @@ class HomeBannerData {
   }
 }
 
+class HomeBannerSlideData {
+  final bool enabled;
+  final String imageUrl;
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+  final String buttonLink;
+  final List<int> productIds;
+
+  const HomeBannerSlideData({
+    required this.enabled,
+    required this.imageUrl,
+    required this.title,
+    required this.subtitle,
+    required this.buttonLabel,
+    required this.buttonLink,
+    required this.productIds,
+  });
+
+  bool get hasImage => imageUrl.isNotEmpty;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'enabled': enabled,
+      'image_url': imageUrl,
+      'title': title,
+      'subtitle': subtitle,
+      'button_label': buttonLabel,
+      'button_link': buttonLink,
+      'product_ids': productIds,
+    };
+  }
+}
+
 class CatalogResponseMeta {
   final int page;
   final int perPage;
@@ -205,6 +239,7 @@ class ProductRepository {
     String? orderBy,
     String? order,
     bool guest = false,
+    bool forceRefresh = false,
   }) async {
     final result = await getProductsPage(
       page: page,
@@ -230,6 +265,7 @@ class ProductRepository {
     String? orderBy,
     String? order,
     bool guest = false,
+    bool forceRefresh = false,
   }) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
@@ -273,6 +309,9 @@ class ProductRepository {
         'envelope': 1,
         'include_gallery': 1,
       };
+      if (forceRefresh) {
+        query['_t'] = DateTime.now().millisecondsSinceEpoch;
+      }
       if (_pricingRev.isNotEmpty) {
         query['pricing_rev'] = _pricingRev;
       }
@@ -315,7 +354,7 @@ class ProductRepository {
         queryParameters: query,
         options: _requestOptions(
           skipAuth: guest,
-          cachePolicy: CachePolicy.noCache,
+          cachePolicy: forceRefresh ? CachePolicy.noCache : CachePolicy.noCache, // Wait, it already used noCache? No, wait, if it already uses noCache, that's fine, adding _t forces bypass.
         ),
       );
 
@@ -408,10 +447,12 @@ class ProductRepository {
   Future<List<ProductModel>> searchProductsWithFilters({
     required ProductSearchQuery query,
     bool guest = false,
+    bool forceRefresh = false,
   }) async {
     final result = await searchProductsWithFiltersPage(
       query: query,
       guest: guest,
+      forceRefresh: forceRefresh,
     );
     return result.products;
   }
@@ -419,6 +460,7 @@ class ProductRepository {
   Future<CatalogProductsPage> searchProductsWithFiltersPage({
     required ProductSearchQuery query,
     bool guest = false,
+    bool forceRefresh = false,
   }) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
@@ -444,6 +486,9 @@ class ProductRepository {
         'include_gallery': 1,
         if (guest) 'guest': 1,
       };
+      if (forceRefresh) {
+        params['_t'] = DateTime.now().millisecondsSinceEpoch;
+      }
       if (_pricingRev.isNotEmpty) {
         params['pricing_rev'] = _pricingRev;
       }
@@ -687,12 +732,15 @@ class ProductRepository {
     );
   }
 
-  Future<List<CategoryModel>> getCategories({bool guest = false}) async {
+  Future<List<CategoryModel>> getCategories({
+    bool guest = false,
+    bool forceRefresh = false,
+  }) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
 
     // Fast path: if we are definitely offline, return local immediately
-    if (reachability.status == ReachabilityStatus.offline) {
+    if (reachability.status == ReachabilityStatus.offline && !forceRefresh) {
       final local = _catalogLocalStore.getCategories(scope: scope);
       if (local.isNotEmpty) {
         final categories = local
@@ -715,6 +763,7 @@ class ProductRepository {
           'per_page': AppConfig.categoriesPerPage,
           ...await _userScopeQuery(guest: guest),
           if (guest) 'guest': 1,
+          if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
         },
         options: _requestOptions(
           skipAuth: skipAuth,
@@ -814,11 +863,14 @@ class ProductRepository {
     }
   }
 
-  Future<List<BrandModel>> getBrands({bool guest = false}) async {
+  Future<List<BrandModel>> getBrands({
+    bool guest = false,
+    bool forceRefresh = false,
+  }) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
 
-    if (reachability.status == ReachabilityStatus.offline) {
+    if (reachability.status == ReachabilityStatus.offline && !forceRefresh) {
       final local = _catalogLocalStore.getBrands(scope: scope);
       if (local.isNotEmpty) {
         final brands = local
@@ -844,6 +896,7 @@ class ProductRepository {
             'page': page,
             ...await _userScopeQuery(guest: guest),
             if (guest) 'guest': 1,
+            if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
           },
           options: _requestOptions(
             skipAuth: skipAuth,
@@ -983,12 +1036,112 @@ class ProductRepository {
     }
   }
 
-  Future<HomeBannerData> getHomeBannerData({bool guest = true}) async {
-    final primary = await _fromHomeBannerEndpoint(guest: guest);
+  Future<List<HomeBannerSlideData>> getCachedHomeBannersData({bool guest = true}) async {
+    final key = 'home_banners_list_${guest ? 'guest' : 'user'}';
+    final raw = _storageService.settingsBox.get(key);
+    if (raw is! String || raw.isEmpty) return <HomeBannerSlideData>[];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list.whereType<Map>().map((map) {
+        return HomeBannerSlideData(
+          enabled: map['enabled'] == true,
+          imageUrl: (map['image_url'] ?? '').toString(),
+          title: (map['title'] ?? '').toString(),
+          subtitle: (map['subtitle'] ?? '').toString(),
+          buttonLabel: (map['button_label'] ?? '').toString(),
+          buttonLink: (map['button_link'] ?? '').toString(),
+          productIds: _parseProductIds(map['product_ids']),
+        );
+      }).toList();
+    } catch (_) {
+      return <HomeBannerSlideData>[];
+    }
+  }
+
+  HomeBannerSlideData _parseSlideData(Map<String, dynamic> map, {bool defaultEnabled = true}) {
+    final enabledRaw = map['enabled'];
+    final enabled = enabledRaw != null ? (enabledRaw == true || enabledRaw == 'true' || enabledRaw == 1) : defaultEnabled;
+    return HomeBannerSlideData(
+      enabled: enabled,
+      imageUrl: _normalizeUrl(map['image_url'] ?? map['image']),
+      title: _normalizeText(map['title']),
+      subtitle: _normalizeText(map['subtitle']),
+      buttonLabel: _normalizeText(map['button_label']),
+      buttonLink: _normalizeUrl(map['button_link'] ?? map['link']),
+      productIds: _parseProductIds(map['product_ids']),
+    );
+  }
+
+  Future<List<HomeBannerSlideData>> getHomeBannersData({bool guest = true, bool forceRefresh = false}) async {
+    final banners = <HomeBannerSlideData>[];
+
+    try {
+      final response = await _dioClient.dio.get(
+        '/dms/v1/home-banner',
+        queryParameters: <String, dynamic>{
+          if (guest) 'guest': 1,
+          if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+        },
+        options: _requestOptions(skipAuth: guest, cachePolicy: CachePolicy.noCache),
+      );
+      final data = response.data;
+      if (data is Map) {
+        if (data.containsKey('items') && data['items'] is List) {
+          banners.addAll((data['items'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+        } else if (data.containsKey('banners') && data['banners'] is List) {
+          banners.addAll((data['banners'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+        } else if (data.containsKey('data') && data['data'] is List) {
+          banners.addAll((data['data'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+        } else {
+          banners.add(_parseSlideData(Map<String, dynamic>.from(data)));
+        }
+      } else if (data is List) {
+        banners.addAll(data.whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+      }
+    } catch (_) {}
+
+    try {
+      final response = await _dioClient.dio.get(
+        '/dms/v1/app/home-layout',
+        queryParameters: <String, dynamic>{
+          if (guest) 'guest': 1,
+          if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+        },
+        options: _requestOptions(skipAuth: guest, cachePolicy: CachePolicy.noCache),
+      );
+      final data = response.data;
+      if (data is Map && data['sections'] is List) {
+        for (final raw in data['sections']) {
+          if (raw is! Map) continue;
+          final section = Map<String, dynamic>.from(raw);
+          final type = (section['type'] ?? '').toString().trim().toLowerCase();
+          if (type != 'banner') continue;
+          banners.add(_parseSlideData(section, defaultEnabled: true));
+        }
+      }
+    } catch (_) {}
+
+    final enabledBanners = banners.where((b) => b.enabled).take(30).toList();
+
+    if (enabledBanners.isNotEmpty) {
+      final key = 'home_banners_list_${guest ? 'guest' : 'user'}';
+      final listJson = enabledBanners.map((b) => b.toJson()).toList();
+      await _storageService.settingsBox.put(key, jsonEncode(listJson));
+      
+      final first = enabledBanners.first;
+      final oldKey = 'home_banner_${guest ? 'guest' : 'user'}';
+      await _storageService.settingsBox.put(oldKey, jsonEncode(first.toJson()));
+    }
+
+    return enabledBanners;
+  }
+
+  Future<HomeBannerData> getHomeBannerData({bool guest = true, bool forceRefresh = false}) async {
+    final primary = await _fromHomeBannerEndpoint(guest: guest, forceRefresh: forceRefresh);
     HomeBannerData result = primary;
 
     if (!primary.hasImage) {
-      final layoutBanner = await _fromHomeLayoutEndpoint(guest: guest);
+      final layoutBanner = await _fromHomeLayoutEndpoint(guest: guest, forceRefresh: forceRefresh);
       if (layoutBanner.hasImage) {
         result = layoutBanner.copyWith(
           title: primary.title.isNotEmpty ? primary.title : layoutBanner.title,
@@ -1005,21 +1158,19 @@ class ProductRepository {
       }
     }
 
-    if (result.hasImage) {
-      final key = 'home_banner_${guest ? 'guest' : 'user'}';
-      await _storageService.settingsBox.put(
-        key,
-        jsonEncode({
-          'enabled': result.enabled,
-          'image_url': result.imageUrl,
-          'title': result.title,
-          'subtitle': result.subtitle,
-          'button_label': result.buttonLabel,
-          'button_link': result.buttonLink,
-          'product_ids': result.productIds,
-        }),
-      );
-    }
+    final key = 'home_banner_${guest ? 'guest' : 'user'}';
+    await _storageService.settingsBox.put(
+      key,
+      jsonEncode(<String, dynamic>{
+        'enabled': result.enabled,
+        'image_url': result.imageUrl,
+        'title': result.title,
+        'subtitle': result.subtitle,
+        'button_label': result.buttonLabel,
+        'button_link': result.buttonLink,
+        'product_ids': result.productIds,
+      }),
+    );
 
     return result;
   }
@@ -1349,11 +1500,14 @@ class ProductRepository {
     };
   }
 
-  Future<HomeBannerData> _fromHomeBannerEndpoint({required bool guest}) async {
+  Future<HomeBannerData> _fromHomeBannerEndpoint({required bool guest, bool forceRefresh = false}) async {
     try {
       final response = await _dioClient.dio.get(
         '/dms/v1/home-banner',
-        queryParameters: <String, dynamic>{if (guest) 'guest': 1},
+        queryParameters: <String, dynamic>{
+          if (guest) 'guest': 1,
+          if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+        },
         options: _requestOptions(
           skipAuth: guest,
           cachePolicy: CachePolicy.noCache,
@@ -1394,11 +1548,14 @@ class ProductRepository {
     }
   }
 
-  Future<HomeBannerData> _fromHomeLayoutEndpoint({required bool guest}) async {
+  Future<HomeBannerData> _fromHomeLayoutEndpoint({required bool guest, bool forceRefresh = false}) async {
     try {
       final response = await _dioClient.dio.get(
         '/dms/v1/app/home-layout',
-        queryParameters: <String, dynamic>{if (guest) 'guest': 1},
+        queryParameters: <String, dynamic>{
+          if (guest) 'guest': 1,
+          if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+        },
         options: _requestOptions(
           skipAuth: guest,
           cachePolicy: CachePolicy.noCache,

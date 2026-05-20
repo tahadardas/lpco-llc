@@ -31,6 +31,8 @@ import 'package:lpco_llc/features/products/presentation/screens/categories_scree
 import 'package:lpco_llc/features/products/presentation/screens/product_details_screen.dart';
 import 'package:lpco_llc/features/products/presentation/screens/saved_products_screen.dart';
 import 'package:lpco_llc/features/products/presentation/screens/scanner_screen.dart';
+import 'package:lpco_llc/features/legal/presentation/screens/privacy_policy_screen.dart';
+import 'package:lpco_llc/features/legal/presentation/screens/terms_of_use_screen.dart';
 
 class AppRouter {
   static final GlobalKey<NavigatorState> rootNavigatorKey =
@@ -395,6 +397,16 @@ class AppRouter {
           return AppRoutePaths.loginRedirect(AppRoutePaths.checkout);
         },
         builder: (context, state) => const CheckoutScreen(),
+      ),
+      GoRoute(
+        path: AppRoutePaths.privacyPolicy,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const PrivacyPolicyScreen(),
+      ),
+      GoRoute(
+        path: AppRoutePaths.termsOfUse,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const TermsOfUseScreen(),
       ),
       // --- Standardized Deep Link Entry Points ---
       GoRoute(

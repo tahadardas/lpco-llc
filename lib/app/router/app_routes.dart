@@ -24,6 +24,8 @@ class AppRoutePaths {
   static const String search = '/search';
   static const String categoryById = '/category';
   static const String brandBySlug = '/brand';
+  static const String privacyPolicy = '/privacy-policy';
+  static const String termsOfUse = '/terms-of-use';
 
   static String loginRedirect(String targetPath) {
     return Uri(

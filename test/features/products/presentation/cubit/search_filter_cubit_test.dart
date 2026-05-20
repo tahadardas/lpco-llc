@@ -26,7 +26,10 @@ class _FakeProductRepository extends ProductRepository {
   });
 
   @override
-  Future<List<CategoryModel>> getCategories({bool guest = false}) async {
+  Future<List<CategoryModel>> getCategories({
+    bool guest = false,
+    bool forceRefresh = false,
+  }) async {
     return categories;
   }
 
@@ -34,6 +37,7 @@ class _FakeProductRepository extends ProductRepository {
   Future<List<ProductModel>> searchProductsWithFilters({
     required ProductSearchQuery query,
     bool guest = false,
+    bool forceRefresh = false,
   }) async {
     return products;
   }
@@ -42,6 +46,7 @@ class _FakeProductRepository extends ProductRepository {
   Future<CatalogProductsPage> searchProductsWithFiltersPage({
     required ProductSearchQuery query,
     bool guest = false,
+    bool forceRefresh = false,
   }) async {
     queries.add(query);
     if (remoteDelay > Duration.zero) {

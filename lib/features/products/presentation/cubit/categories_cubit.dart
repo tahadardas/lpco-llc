@@ -39,7 +39,7 @@ class CategoriesCubit extends Cubit<CategoriesState> {
       _isGuest = isGuest,
       super(const CategoriesState());
 
-  Future<void> initialize() async {
+  Future<void> initialize({bool forceRefresh = false}) async {
     emit(state.copyWith(status: CategoriesStatus.loading, errorMessage: ''));
 
     var emittedFromCache = false;
@@ -59,7 +59,7 @@ class CategoriesCubit extends Cubit<CategoriesState> {
     } catch (_) {}
 
     try {
-      final categories = await _repository.getCategories(guest: _isGuest);
+      final categories = await _repository.getCategories(guest: _isGuest, forceRefresh: forceRefresh);
       if (isClosed) return;
       emit(
         state.copyWith(
@@ -83,5 +83,5 @@ class CategoriesCubit extends Cubit<CategoriesState> {
     }
   }
 
-  Future<void> refresh() => initialize();
+  Future<void> refresh() => initialize(forceRefresh: true);
 }

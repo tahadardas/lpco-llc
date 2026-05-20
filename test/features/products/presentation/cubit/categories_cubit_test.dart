@@ -17,7 +17,10 @@ class _FakeCategoryRepository extends ProductRepository {
   }
 
   @override
-  Future<List<CategoryModel>> getCategories({bool guest = false}) async {
+  Future<List<CategoryModel>> getCategories({
+    bool guest = false,
+    bool forceRefresh = false,
+  }) async {
     return remoteCategories;
   }
 }

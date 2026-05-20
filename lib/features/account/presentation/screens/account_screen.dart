@@ -111,6 +111,16 @@ class AccountScreen extends StatelessWidget {
                       title: 'لوحة الإدارة',
                       onTap: () => context.push(AppRoutePaths.admin),
                     ),
+                  _actionTile(
+                    icon: Icons.privacy_tip_rounded,
+                    title: 'سياسة الخصوصية',
+                    onTap: () => context.push(AppRoutePaths.privacyPolicy),
+                  ),
+                  _actionTile(
+                    icon: Icons.gavel_rounded,
+                    title: 'شروط الاستخدام',
+                    onTap: () => context.push(AppRoutePaths.termsOfUse),
+                  ),
                 ],
               ),
               const SizedBox(height: 14),
