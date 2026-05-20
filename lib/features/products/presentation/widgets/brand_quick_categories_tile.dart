@@ -41,15 +41,21 @@ class _BrandQuickCategoriesTileState extends State<BrandQuickCategoriesTile>
   bool _isLoading = false;
   List<CategoryModel> _dynamicCategories = [];
 
-  bool get _hasCuratedMenu =>
-      (widget.curatedMenu != null || widget.resolvedCuratedMenu != null) &&
-      widget.onTapCuratedCategory != null;
+  bool get _hasResolvedMenu =>
+      widget.resolvedCuratedMenu != null && widget.onTapCategory != null;
 
-  bool get _canExpand => _hasCuratedMenu || widget.onTapCategory != null;
+  bool get _hasCuratedMenu =>
+      widget.curatedMenu != null && widget.onTapCuratedCategory != null;
+
+  bool get _canExpand =>
+      _hasResolvedMenu || _hasCuratedMenu || widget.onTapCategory != null;
 
   Future<void> _handleExpand() async {
     final nextState = !_isExpanded;
-    if (nextState && !_hasCuratedMenu && _dynamicCategories.isEmpty) {
+    if (nextState &&
+        !_hasResolvedMenu &&
+        !_hasCuratedMenu &&
+        _dynamicCategories.isEmpty) {
       await _loadDynamicCategories();
     }
     setState(() => _isExpanded = nextState);
@@ -86,36 +92,6 @@ class _BrandQuickCategoriesTileState extends State<BrandQuickCategoriesTile>
     } catch (_) {
       return null;
     }
-  }
-
-  ResolvedBrandScopedCategoryMenu? _getFilteredCuratedMenu() {
-    const resolver = BrandScopedCategoryResolver();
-    final cubit = _tryReadProductCubit();
-    final categories = cubit?.state.categories ?? const <CategoryModel>[];
-    final categoryIdsForBrand =
-        cubit?.getActiveCategoryIdsForBrand(widget.brandSlug) ?? const <int>{};
-
-    // 1. Resolve global categories to our curated config
-    final resolved =
-        widget.resolvedCuratedMenu ??
-        (categories.isNotEmpty
-            ? resolver.resolve(
-                brandSlug: widget.brandSlug,
-                categories: categories,
-              )
-            : null);
-
-    if (resolved == null) return null;
-
-    // 2. Filter by actual product availability if we have the index
-    if (categoryIdsForBrand.isNotEmpty) {
-      return resolver.filterByAvailableCategories(
-        menu: resolved,
-        availableCategoryIds: categoryIdsForBrand,
-      );
-    }
-
-    return resolved;
   }
 
   @override
@@ -241,10 +217,17 @@ class _BrandQuickCategoriesTileState extends State<BrandQuickCategoriesTile>
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeOutCubic,
               child: _isExpanded
-                  ? (_hasCuratedMenu
+                  ? (_hasResolvedMenu
+                        ? _ExpandedResolvedCategoriesPanel(
+                            brandTitle: widget.title,
+                            menu: widget.resolvedCuratedMenu!,
+                            onTapBrand: widget.onTapBrand,
+                            onTapCategory: widget.onTapCategory!,
+                          )
+                        : _hasCuratedMenu
                         ? _ExpandedQuickCategoriesPanel(
                             brandTitle: widget.title,
-                            menu: _getFilteredCuratedMenu(),
+                            menu: null,
                             fallbackMenuConfig: widget.curatedMenu,
                             onTapBrand: widget.onTapBrand,
                             onTapCuratedCategory: widget.onTapCuratedCategory!,
@@ -262,6 +245,99 @@ class _BrandQuickCategoriesTileState extends State<BrandQuickCategoriesTile>
         ),
       ),
     );
+  }
+}
+
+class _ExpandedResolvedCategoriesPanel extends StatelessWidget {
+  final String brandTitle;
+  final ResolvedBrandScopedCategoryMenu menu;
+  final VoidCallback onTapBrand;
+  final ValueChanged<CategoryModel> onTapCategory;
+
+  const _ExpandedResolvedCategoriesPanel({
+    required this.brandTitle,
+    required this.menu,
+    required this.onTapBrand,
+    required this.onTapCategory,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = menu.items;
+    if (items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+          Text(
+            '\u062A\u0635\u0641\u062D \u062A\u0635\u0646\u064A\u0641\u0627\u062A $brandTitle \u0623\u0648 \u0627\u0641\u062A\u062D \u0643\u0644 \u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF5F6979),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: OutlinedButton.icon(
+              onPressed: onTapBrand,
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              label: Text(
+                '\u0643\u0644 \u0645\u0646\u062A\u062C\u0627\u062A $brandTitle',
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: items
+                .map<Widget>(
+                  (item) => ActionChip(
+                    key: ValueKey<String>(
+                      'brand_quick_category_${item.stableKey}',
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 0,
+                    ),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    avatar: const Icon(
+                      Icons.subdirectory_arrow_left_rounded,
+                      size: 14,
+                    ),
+                    label: Text(
+                      _labelFor(item.category),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onPressed: () => onTapCategory(item.category),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _labelFor(CategoryModel category) {
+    if (category.count > 0) {
+      return '${category.name} (${category.count})';
+    }
+    return category.name;
   }
 }
 

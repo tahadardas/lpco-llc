@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/search_filter_cubit.dart';
-import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_config.dart';
 import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/brand_scoped_category_menu.dart';
 
@@ -27,55 +27,37 @@ class _TestSearchFilterCubit extends SearchFilterCubit {
   }
 }
 
-class _DuplicateSlugMenuSource extends BrandScopedCategoryMenuSource {
-  const _DuplicateSlugMenuSource();
-
-  @override
-  List<BrandScopedCategoryItemConfig> get items =>
-      const <BrandScopedCategoryItemConfig>[
-        BrandScopedCategoryItemConfig(
-          brandId: 'deli',
-          brandAliases: <String>['deli'],
-          brandLabelAr: 'Deli',
-          labelAr: 'Hole Punchers',
-          categorySlug: 'hole-punchers-staplers-binder-clips',
-          sectionTitleAr: 'Quick Categories',
-          orderIndex: 2,
-        ),
-        BrandScopedCategoryItemConfig(
-          brandId: 'deli',
-          brandAliases: <String>['deli'],
-          brandLabelAr: 'Deli',
-          labelAr: 'Binder Clips',
-          categorySlug: 'hole-punchers-staplers-binder-clips',
-          sectionTitleAr: 'Quick Categories',
-          orderIndex: 3,
-        ),
-      ];
-}
-
-const CategoryModel _deliBallpointCategory = CategoryModel(
-  id: 101,
-  name: 'Ballpoint Pens',
-  slug: 'ballpoint-pens',
+const BrandModel _deliBrand = BrandModel(
+  id: 1,
+  name: '\u062F\u0644\u064A',
+  slug: 'deli',
   count: 12,
+  imageUrl: '',
+);
+
+const CategoryModel _deliRootCategory = CategoryModel(
+  id: 100,
+  name: 'Deli',
+  slug: 'deli',
+  count: 12,
+  imageUrl: '',
+);
+
+const CategoryModel _deliCalculatorsCategory = CategoryModel(
+  id: 101,
+  name: 'Deli Calculators',
+  slug: 'deli-calculators',
+  count: 5,
   imageUrl: '',
 );
 
 const CategoryModel _deliGelCategory = CategoryModel(
   id: 102,
-  name: 'Gel Pens',
-  slug: 'gel-ink-pens',
+  name: 'Deli Gel Pens',
+  slug: 'deli-gel-pens',
   count: 7,
   imageUrl: '',
-);
-
-const CategoryModel _zeroBallpointCategory = CategoryModel(
-  id: 201,
-  name: 'Ballpoint Pens',
-  slug: 'ballpoint-pens',
-  count: 4,
-  imageUrl: '',
+  menuOrder: 2,
 );
 
 const CategoryModel _otherCategory = CategoryModel(
@@ -86,25 +68,21 @@ const CategoryModel _otherCategory = CategoryModel(
   imageUrl: '',
 );
 
-const CategoryModel _sharedResolvedCategory = CategoryModel(
-  id: 301,
-  name: 'Office Tools',
-  slug: 'hole-punchers-staplers-binder-clips',
-  count: 8,
-  imageUrl: '',
-);
-
 void main() {
   Future<void> pumpMenu(
     WidgetTester tester, {
-    required String brandSlug,
-    required List<CategoryModel> categories,
-    required Set<int> selectedCategoryIds,
+    BrandModel? brand = _deliBrand,
+    String brandSlug = 'deli',
+    List<CategoryModel> categories = const <CategoryModel>[
+      _deliRootCategory,
+      _deliCalculatorsCategory,
+      _deliGelCategory,
+    ],
+    Set<int> selectedCategoryIds = const <int>{},
+    Set<int> productDerivedCategoryIds = const <int>{},
     required FutureOr<void> Function(ResolvedBrandScopedCategoryItem item)
     onSelectCategory,
     required FutureOr<void> Function() onClearCategory,
-    BrandScopedCategoryMenuSource menuSource =
-        const LocalBrandScopedCategoryMenuSource(),
     Size size = const Size(900, 1400),
   }) async {
     await tester.binding.setSurfaceSize(size);
@@ -116,13 +94,14 @@ void main() {
           textDirection: TextDirection.rtl,
           child: Scaffold(
             body: BrandScopedCategoryMenu(
+              brand: brand,
               brandSlug: brandSlug,
-              brandTitle: '',
+              brandTitle: brand?.name ?? brandSlug,
               categories: categories,
               selectedCategoryIds: selectedCategoryIds,
+              productDerivedCategoryIds: productDerivedCategoryIds,
               onSelectCategory: onSelectCategory,
               onClearCategory: onClearCategory,
-              menuSource: menuSource,
             ),
           ),
         ),
@@ -131,12 +110,11 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('menu appears for configured brand aliases', (tester) async {
+  testWidgets('menu appears for categories linked to the brand slug', (
+    tester,
+  ) async {
     await pumpMenu(
       tester,
-      brandSlug: 'zero-miss',
-      categories: const <CategoryModel>[_zeroBallpointCategory],
-      selectedCategoryIds: const <int>{},
       onSelectCategory: (_) async {},
       onClearCategory: () async {},
     );
@@ -145,15 +123,34 @@ void main() {
       find.byKey(const ValueKey<String>('brand_scoped_category_menu')),
       findsOneWidget,
     );
-    expect(find.text('تصنيفات Zero'), findsNothing);
+    expect(
+      find.byKey(
+        const ValueKey<String>('brand_scoped_category_item_deli_1_deli'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        const ValueKey<String>(
+          'brand_scoped_category_item_deli_2_deli-calculators',
+        ),
+      ),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('non-curated brands do not show the menu', (tester) async {
+  testWidgets('unlinked brands hide the menu gracefully', (tester) async {
     await pumpMenu(
       tester,
+      brand: const BrandModel(
+        id: 2,
+        name: 'Acme',
+        slug: 'acme',
+        count: 0,
+        imageUrl: '',
+      ),
       brandSlug: 'acme',
       categories: const <CategoryModel>[_otherCategory],
-      selectedCategoryIds: const <int>{},
       onSelectCategory: (_) async {},
       onClearCategory: () async {},
     );
@@ -165,14 +162,15 @@ void main() {
   });
 
   testWidgets(
-    'tapping curated item applies category filter and keeps brand scope',
+    'tapping linked category applies category filter and keeps brand scope',
     (tester) async {
       final cubit = _TestSearchFilterCubit()
         ..seed(
           const SearchFilterState(
             status: SearchFilterStatus.loaded,
             categories: <CategoryModel>[
-              _deliBallpointCategory,
+              _deliRootCategory,
+              _deliCalculatorsCategory,
               _deliGelCategory,
             ],
             query: ProductSearchQuery(
@@ -186,23 +184,21 @@ void main() {
 
       await pumpMenu(
         tester,
-        brandSlug: 'deli',
         categories: cubit.state.categories,
         selectedCategoryIds: cubit.state.query.categoryIds.toSet(),
-        onSelectCategory: (item) => cubit.applyCuratedCategory(item.categoryId),
+        onSelectCategory: (item) => cubit.applyCuratedCategory(
+          item.categoryId,
+          categorySlug: item.categorySlug,
+          labelAr: item.labelAr,
+        ),
         onClearCategory: () => cubit.applyCuratedCategory(null),
       );
 
       await tester.tap(
         find.byKey(
-          const ValueKey<String>('brand_scoped_category_menu_toggle_button'),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(
-        find.byKey(
-          const ValueKey<String>('brand_scoped_category_item_deli_2_gel-ink-pens'),
+          const ValueKey<String>(
+            'brand_scoped_category_item_deli_3_deli-gel-pens',
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -214,48 +210,40 @@ void main() {
     },
   );
 
-  testWidgets('missing category slugs are ignored safely', (tester) async {
+  testWidgets('product-derived categories are included as fallback', (
+    tester,
+  ) async {
     await pumpMenu(
       tester,
-      brandSlug: 'deli',
-      categories: const <CategoryModel>[_deliBallpointCategory],
-      selectedCategoryIds: const <int>{},
+      categories: const <CategoryModel>[
+        _deliCalculatorsCategory,
+        _otherCategory,
+      ],
+      productDerivedCategoryIds: const <int>{999},
       onSelectCategory: (_) async {},
       onClearCategory: () async {},
     );
 
-    await tester.tap(
-      find.byKey(
-        const ValueKey<String>('brand_scoped_category_menu_toggle_button'),
-      ),
-    );
-    await tester.pumpAndSettle();
-
     expect(
       find.byKey(
-        const ValueKey<String>('brand_scoped_category_item_deli_1_ballpoint-pens'),
+        const ValueKey<String>(
+          'brand_scoped_category_item_deli_2_other-category',
+        ),
       ),
       findsOneWidget,
     );
-    expect(
-      find.byKey(
-        const ValueKey<String>('brand_scoped_category_item_deli_2_gel-ink-pens'),
-      ),
-      findsNothing,
-    );
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'clearing curated category returns to all products within the same brand',
+    'clearing linked category returns to all products within the same brand',
     (tester) async {
       final cubit = _TestSearchFilterCubit()
         ..seed(
           const SearchFilterState(
             status: SearchFilterStatus.loaded,
             categories: <CategoryModel>[
-              _deliBallpointCategory,
-              _deliGelCategory,
+              _deliRootCategory,
+              _deliCalculatorsCategory,
             ],
             query: ProductSearchQuery(
               search: 'pen',
@@ -269,24 +257,18 @@ void main() {
 
       await pumpMenu(
         tester,
-        brandSlug: 'deli',
         categories: cubit.state.categories,
         selectedCategoryIds: cubit.state.query.categoryIds.toSet(),
-        onSelectCategory: (item) => cubit.applyCuratedCategory(item.categoryId),
+        onSelectCategory: (item) => cubit.applyCuratedCategory(
+          item.categoryId,
+          categorySlug: item.categorySlug,
+          labelAr: item.labelAr,
+        ),
         onClearCategory: () => cubit.applyCuratedCategory(null),
       );
 
       await tester.tap(
-        find.byKey(
-          const ValueKey<String>('brand_scoped_category_menu_toggle_button'),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(
-        find.byKey(
-          const ValueKey<String>('brand_scoped_category_clear_button'),
-        ),
+        find.byKey(const ValueKey<String>('brand_scoped_category_all')),
       );
       await tester.pumpAndSettle();
 
@@ -296,43 +278,4 @@ void main() {
       expect(cubit.state.query.sortOption, ProductSortOption.priceHighToLow);
     },
   );
-
-  testWidgets('renders duplicate resolved slugs without key collisions', (
-    tester,
-  ) async {
-    await pumpMenu(
-      tester,
-      brandSlug: 'deli',
-      categories: const <CategoryModel>[_sharedResolvedCategory],
-      selectedCategoryIds: const <int>{},
-      menuSource: const _DuplicateSlugMenuSource(),
-      onSelectCategory: (_) async {},
-      onClearCategory: () async {},
-    );
-
-    await tester.tap(
-      find.byKey(
-        const ValueKey<String>('brand_scoped_category_menu_toggle_button'),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(
-        const ValueKey<String>(
-          'brand_scoped_category_item_deli_2_hole-punchers-staplers-binder-clips',
-        ),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(
-        const ValueKey<String>(
-          'brand_scoped_category_item_deli_3_hole-punchers-staplers-binder-clips',
-        ),
-      ),
-      findsOneWidget,
-    );
-    expect(tester.takeException(), isNull);
-  });
 }

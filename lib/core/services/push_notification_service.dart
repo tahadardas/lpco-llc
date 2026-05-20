@@ -342,7 +342,7 @@ class PushNotificationService {
     );
 
     await _localNotifications.initialize(
-      settings,
+      settings: settings,
       onDidReceiveNotificationResponse: (response) {
         _handleLocalNotificationPayload(response.payload);
       },
@@ -433,10 +433,10 @@ class PushNotificationService {
     );
 
     await _localNotifications.show(
-      _notificationIdFor(message),
-      title.isEmpty ? 'LPCO' : title,
-      body,
-      NotificationDetails(
+      id: _notificationIdFor(message),
+      title: title.isEmpty ? 'LPCO' : title,
+      body: body,
+      notificationDetails: NotificationDetails(
         android: androidDetails,
         iOS: darwinDetails,
         macOS: darwinDetails,

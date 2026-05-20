@@ -7,7 +7,6 @@ import 'package:lpco_llc/core/widgets/app_drawer.dart';
 import 'package:lpco_llc/core/widgets/app_skeleton.dart';
 import 'package:lpco_llc/core/widgets/brand_app_bar.dart';
 import 'package:lpco_llc/features/products/data/models/brand_model.dart';
-import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/brand_quick_categories_tile.dart';
@@ -170,66 +169,40 @@ class _BrandsScreenState extends State<BrandsScreen> {
                         const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final brand = filtered[index];
-                      final curatedMenu = _brandCategoryResolver.resolveConfig(
+                      final normalizedBrandSlug =
+                          BrandScopedCategoryResolver.normalizeBrandKey(
+                            brand.slug,
+                          );
+                      final productDerivedCategoryIds = context
+                          .read<ProductCubit>()
+                          .getActiveCategoryIdsForBrand(brand.slug);
+                      final resolvedMenu = _brandCategoryResolver.resolve(
+                        brand: brand,
                         brandSlug: brand.slug,
+                        brandTitle: brand.name,
+                        categories: state.categories,
+                        productDerivedCategoryIds: productDerivedCategoryIds,
                       );
                       return BrandQuickCategoriesTile(
                         brandSlug: brand.slug,
                         title: brand.name,
                         subtitle: '${brand.count} منتج',
                         imageUrl: brand.imageUrl,
-                        curatedMenu: curatedMenu,
+                        resolvedCuratedMenu: resolvedMenu,
                         onTapBrand: () => context.push(
-                          AppRoutePaths.brandUrl(
-                            BrandScopedCategoryResolver.normalizeBrandKey(
-                              brand.slug,
-                            ),
-                          ),
+                          AppRoutePaths.brandUrl(normalizedBrandSlug),
                         ),
-                        onTapCuratedCategory: (item) {
-                          final categories = context
-                              .read<ProductCubit>()
-                              .state
-                              .categories;
-                          final normalizedQuery =
-                              BrandScopedCategoryResolver.normalizeCategorySlug(
-                                item.categorySlug,
-                              );
-
-                          final matchedCat = categories
-                              .cast<CategoryModel?>()
-                              .firstWhere(
-                                (c) =>
-                                    BrandScopedCategoryResolver.normalizeCategorySlug(
-                                      c?.slug ?? '',
-                                    ) ==
-                                    normalizedQuery,
-                                orElse: () => null,
-                              );
-
-                          context.push(
-                            AppRoutePaths.brandUrl(
-                              BrandScopedCategoryResolver.normalizeBrandKey(
-                                brand.slug,
+                        onTapCategory: resolvedMenu == null
+                            ? null
+                            : (cat) => context.push(
+                                AppRoutePaths.brandUrl(
+                                  normalizedBrandSlug,
+                                  title: '${brand.name} - ${cat.name}',
+                                  curatedCategoryId: cat.id,
+                                  curatedCategorySlug: cat.slug,
+                                  curatedCategoryLabel: cat.name,
+                                ),
                               ),
-                              title: '${brand.name} - ${item.labelAr}',
-                              curatedCategoryId: matchedCat?.id,
-                              curatedCategorySlug: item.categorySlug,
-                              curatedCategoryLabel: item.labelAr,
-                            ),
-                          );
-                        },
-                        onTapCategory: (cat) => context.push(
-                          AppRoutePaths.brandUrl(
-                            BrandScopedCategoryResolver.normalizeBrandKey(
-                              brand.slug,
-                            ),
-                            title: '${brand.name} - ${cat.name}',
-                            curatedCategoryId: cat.id,
-                            curatedCategorySlug: cat.slug,
-                            curatedCategoryLabel: cat.name,
-                          ),
-                        ),
                       );
                     },
                   ),

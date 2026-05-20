@@ -12,8 +12,10 @@ import 'package:lpco_llc/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:lpco_llc/features/cart/data/models/cart_item_model.dart';
 import 'package:lpco_llc/features/cart/presentation/cubit/cart_cubit.dart';
 import 'package:lpco_llc/features/cart/presentation/widgets/cart_currency_conflict_dialog.dart';
+import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
+import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/search_filter_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/catalog_empty_state.dart';
@@ -81,6 +83,9 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
 
   String get _scopedEmptyMessage {
     if (_isBrandListing) {
+      if (_searchFilterCubit.activeCuratedCategoryId != null) {
+        return '\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0646\u062A\u062C\u0627\u062A \u0636\u0645\u0646 \u0647\u0630\u0627 \u0627\u0644\u062A\u0635\u0646\u064A\u0641 \u0644\u0647\u0630\u0647 \u0627\u0644\u0639\u0644\u0627\u0645\u0629 \u062D\u0627\u0644\u064A\u0627\u064B';
+      }
       return '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0646\u062a\u062c\u0627\u062a \u0645\u062a\u0627\u062d\u0629 \u0644\u0647\u0630\u0647 \u0627\u0644\u0639\u0644\u0627\u0645\u0629 \u062d\u0627\u0644\u064a\u0627\u064b';
     }
     return '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0646\u062a\u062c\u0627\u062a \u0645\u062a\u0627\u062d\u0629 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u0642\u0633\u0645 \u062d\u0627\u0644\u064a\u0627\u064b';
@@ -594,10 +599,19 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
   }
 
   Widget _brandScopedCategoryMenu(SearchFilterState state) {
+    final brandSlug = widget.brandSlug?.trim() ?? '';
+    final productState = context.watch<ProductCubit>().state;
+    final brand = _findCurrentBrand(productState.brands, brandSlug);
+    final productDerivedCategoryIds = context
+        .read<ProductCubit>()
+        .getActiveCategoryIdsForBrand(brandSlug);
+
     return BrandScopedCategoryMenu(
+      brand: brand,
       brandSlug: widget.brandSlug,
       brandTitle: widget.title,
       categories: state.categories,
+      productDerivedCategoryIds: productDerivedCategoryIds,
       selectedCategoryIds: _searchFilterCubit.activeCuratedCategoryId != null
           ? <int>{_searchFilterCubit.activeCuratedCategoryId!}
           : const <int>{},
@@ -607,6 +621,30 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
         labelAr: item.labelAr,
       ),
       onClearCategory: () => _searchFilterCubit.applyCuratedCategory(null),
+    );
+  }
+
+  BrandModel? _findCurrentBrand(List<BrandModel> brands, String brandSlug) {
+    final normalizedSlug = BrandScopedCategoryResolver.normalizeBrandKey(
+      brandSlug,
+    );
+    if (normalizedSlug.isEmpty) {
+      return null;
+    }
+
+    for (final brand in brands) {
+      if (BrandScopedCategoryResolver.normalizeBrandKey(brand.slug) ==
+          normalizedSlug) {
+        return brand;
+      }
+    }
+
+    return BrandModel(
+      id: 0,
+      name: widget.title.trim().isEmpty ? normalizedSlug : widget.title.trim(),
+      slug: normalizedSlug,
+      count: 0,
+      imageUrl: '',
     );
   }
 

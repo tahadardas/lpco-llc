@@ -5,12 +5,14 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:lpco_llc/core/local/catalog_local_store.dart';
 import 'package:lpco_llc/core/network/dio_client.dart';
 import 'package:lpco_llc/core/storage/storage_service.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeDioClient implements DioClient {
   @override
@@ -122,6 +124,12 @@ void main() {
   late Directory hiveDir;
 
   setUpAll(() async {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final storage = StorageService();
+    storage.secureStorage = const FlutterSecureStorage();
+    storage.sharedPreferences = await SharedPreferences.getInstance();
+
     hiveDir = await Directory.systemTemp.createTemp('brand_order_test');
     Hive.init(hiveDir.path);
     await Hive.openBox(StorageService.catalogBoxName);

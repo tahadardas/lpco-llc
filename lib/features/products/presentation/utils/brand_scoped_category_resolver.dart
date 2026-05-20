@@ -1,4 +1,6 @@
+import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
+import 'package:lpco_llc/features/products/domain/brand_category_linker.dart';
 import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_config.dart';
 
 class ResolvedBrandScopedCategoryItem {
@@ -11,8 +13,10 @@ class ResolvedBrandScopedCategoryItem {
   });
 
   int get categoryId => category.id;
-  String get categorySlug => config.categorySlug;
-  String get labelAr => config.labelAr;
+  String get categorySlug =>
+      category.slug.trim().isNotEmpty ? category.slug : config.categorySlug;
+  String get labelAr =>
+      category.name.trim().isNotEmpty ? category.name : config.labelAr;
   String? get sectionTitleAr => config.sectionTitleAr;
   int get orderIndex => config.orderIndex;
   String get stableKey => config.stableKey;
@@ -63,13 +67,91 @@ class ResolvedBrandScopedCategoryMenu {
 
 class BrandScopedCategoryResolver {
   final BrandScopedCategoryMenuSource _source;
+  final BrandCategoryLinker _linker;
 
   const BrandScopedCategoryResolver({
     BrandScopedCategoryMenuSource source =
         const LocalBrandScopedCategoryMenuSource(),
-  }) : _source = source;
+    BrandCategoryLinker linker = const BrandCategoryLinker(),
+  }) : _source = source,
+       _linker = linker;
 
   ResolvedBrandScopedCategoryMenu? resolve({
+    BrandModel? brand,
+    required String? brandSlug,
+    String? brandTitle,
+    required List<CategoryModel> categories,
+    Set<int>? productDerivedCategoryIds,
+    bool allowConfiguredFallback = false,
+  }) {
+    final resolvedBrand = _resolveBrand(
+      brand: brand,
+      brandSlug: brandSlug,
+      brandTitle: brandTitle,
+    );
+    if (resolvedBrand == null || categories.isEmpty) {
+      return null;
+    }
+
+    final linkedCategories = _linker.findLinkedCategoriesForBrand(
+      brand: resolvedBrand,
+      categories: categories,
+      productDerivedCategoryIds: productDerivedCategoryIds,
+    );
+    if (linkedCategories.isNotEmpty) {
+      return _buildGeneratedMenu(
+        brand: resolvedBrand,
+        categories: linkedCategories,
+      );
+    }
+
+    if (!allowConfiguredFallback) {
+      return null;
+    }
+
+    return _resolveConfiguredMenu(
+      brandSlug: resolvedBrand.slug,
+      categories: categories,
+    );
+  }
+
+  /// Filters a resolved menu to only include categories that have products for the brand.
+  ResolvedBrandScopedCategoryMenu? filterByAvailableCategories({
+    required ResolvedBrandScopedCategoryMenu menu,
+    required Set<int> availableCategoryIds,
+  }) {
+    if (availableCategoryIds.isEmpty) {
+      return null;
+    }
+
+    final filteredItems = menu.items
+        .where((item) => availableCategoryIds.contains(item.categoryId))
+        .toList();
+
+    if (filteredItems.isEmpty) {
+      return null;
+    }
+
+    // We need the original config menu to preserve metadata
+    final configMenu = resolveConfig(brandSlug: menu.brandId);
+    if (configMenu == null) {
+      return ResolvedBrandScopedCategoryMenu(
+        brandId: menu.brandId,
+        brandLabelAr: menu.brandLabelAr,
+        brandAliases: menu.brandAliases,
+        sections: <ResolvedBrandScopedCategorySection>[
+          ResolvedBrandScopedCategorySection(
+            titleAr: null,
+            items: filteredItems,
+          ),
+        ],
+      );
+    }
+
+    return _buildResolvedMenu(configMenu, filteredItems);
+  }
+
+  ResolvedBrandScopedCategoryMenu? _resolveConfiguredMenu({
     required String? brandSlug,
     required List<CategoryModel> categories,
   }) {
@@ -106,28 +188,70 @@ class BrandScopedCategoryResolver {
     return _buildResolvedMenu(configMenu, resolvedItems);
   }
 
-  /// Filters a resolved menu to only include categories that have products for the brand.
-  ResolvedBrandScopedCategoryMenu? filterByAvailableCategories({
-    required ResolvedBrandScopedCategoryMenu menu,
-    required Set<int> availableCategoryIds,
+  ResolvedBrandScopedCategoryMenu _buildGeneratedMenu({
+    required BrandModel brand,
+    required List<CategoryModel> categories,
   }) {
-    if (availableCategoryIds.isEmpty) {
+    final normalizedBrand = normalizeBrandKey(brand.slug);
+    final brandLabel = brand.name.trim().isNotEmpty
+        ? brand.name.trim()
+        : normalizedBrand;
+    final items = <ResolvedBrandScopedCategoryItem>[];
+
+    for (final entry in categories.asMap().entries) {
+      final category = entry.value;
+      final orderIndex = entry.key + 1;
+      final config = BrandScopedCategoryItemConfig(
+        brandId: normalizedBrand,
+        brandAliases: <String>[
+          normalizedBrand,
+          if (brand.name.trim().isNotEmpty) brand.name.trim(),
+        ],
+        brandLabelAr: brandLabel,
+        labelAr: category.name,
+        categorySlug: category.slug,
+        orderIndex: orderIndex,
+      );
+      items.add(
+        ResolvedBrandScopedCategoryItem(config: config, category: category),
+      );
+    }
+
+    return ResolvedBrandScopedCategoryMenu(
+      brandId: normalizedBrand,
+      brandLabelAr: brandLabel,
+      brandAliases: <String>[
+        normalizedBrand,
+        if (brand.name.trim().isNotEmpty) brand.name.trim(),
+      ],
+      sections: <ResolvedBrandScopedCategorySection>[
+        ResolvedBrandScopedCategorySection(titleAr: null, items: items),
+      ],
+    );
+  }
+
+  BrandModel? _resolveBrand({
+    required BrandModel? brand,
+    required String? brandSlug,
+    required String? brandTitle,
+  }) {
+    if (brand != null) {
+      return brand;
+    }
+
+    final normalizedBrand = normalizeBrandKey(brandSlug ?? '');
+    if (normalizedBrand.isEmpty) {
       return null;
     }
 
-    final filteredItems = menu.items
-        .where((item) => availableCategoryIds.contains(item.categoryId))
-        .toList();
-
-    if (filteredItems.isEmpty) {
-      return null;
-    }
-
-    // We need the original config menu to preserve metadata
-    final configMenu = resolveConfig(brandSlug: menu.brandId);
-    if (configMenu == null) return null;
-
-    return _buildResolvedMenu(configMenu, filteredItems);
+    final title = brandTitle?.trim();
+    return BrandModel(
+      id: 0,
+      name: title == null || title.isEmpty ? normalizedBrand : title,
+      slug: normalizedBrand,
+      count: 0,
+      imageUrl: '',
+    );
   }
 
   ResolvedBrandScopedCategoryMenu _buildResolvedMenu(
@@ -229,30 +353,11 @@ class BrandScopedCategoryResolver {
   }
 
   static String normalizeBrandKey(String value) {
-    var normalized = _safeDecode(value).trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return '';
-    }
-
-    normalized = normalized
-        .replaceAll(RegExp(r'[_\s]+'), '-')
-        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF-]+'), '')
-        .replaceAll(RegExp(r'-{2,}'), '-')
-        .replaceAll(RegExp(r'^-+|-+$'), '');
-    return normalized;
+    return BrandCategoryLinker.normalizeSlug(value);
   }
 
   static String normalizeCategorySlug(String value) {
-    var normalized = _safeDecode(value).trim().toLowerCase();
-    if (normalized.isEmpty) {
-      return '';
-    }
-
-    normalized = normalized
-        .replaceAll('\\', '/')
-        .replaceAll(RegExp(r'^/+|/+$'), '')
-        .replaceAll(RegExp(r'\s+'), '-');
-    return normalized;
+    return BrandCategoryLinker.normalizeSlug(value);
   }
 
   static String? _normalizeSectionTitle(String? value) {
@@ -261,13 +366,5 @@ class BrandScopedCategoryResolver {
       return null;
     }
     return normalized;
-  }
-
-  static String _safeDecode(String value) {
-    try {
-      return Uri.decodeFull(value);
-    } catch (_) {
-      return value;
-    }
   }
 }

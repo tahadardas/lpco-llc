@@ -569,6 +569,39 @@ class ProductRepository {
     }
   }
 
+  /// Returns the number of products for a specific brand + category combination.
+  /// Returns null if the count cannot be determined. Does not fail the UI.
+  Future<int?> getBrandCategoryProductCount({
+    required String brandSlug,
+    required int categoryId,
+    bool guest = true,
+  }) async {
+    try {
+      final query = <String, dynamic>{
+        'brand_slug': brandSlug.trim(),
+        'category': categoryId,
+        'per_page': 1,
+        'page': 1,
+        'envelope': 1,
+        if (guest) 'guest': 1,
+      };
+      final response = await _dioClient.dio.get(
+        '/dms/v1/products-plus',
+        queryParameters: query,
+        options: _requestOptions(skipAuth: guest),
+      );
+      final meta = CatalogResponseMeta.fromJson(
+        response.data,
+        fallbackPage: 1,
+        fallbackPerPage: 1,
+        fallbackCount: 0,
+      );
+      return (meta.total ?? 0) > 0 ? meta.total : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<ProductModel?> getProductById(int id, {bool guest = false}) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
@@ -957,6 +990,8 @@ class ProductRepository {
                 'slug': brand.slug,
                 'count': brand.count,
                 'image_url': brand.imageUrl,
+                'linked_category_ids': brand.linkedCategoryIds,
+                'linked_category_slugs': brand.linkedCategorySlugs,
                 'show_in_app': true,
                 'hidden': false,
               },

@@ -1638,6 +1638,84 @@ function dms_ecom_resolve_brand_image_url($term) {
 }
 }
 
+if (!function_exists('dms_ecom_brand_category_slug_matches')) {
+function dms_ecom_brand_category_slug_matches($category_slug, $brand_slug) {
+    $category_slug = sanitize_title((string) $category_slug);
+    $brand_slug = sanitize_title((string) $brand_slug);
+    if ($category_slug === '' || $brand_slug === '') return false;
+    return $category_slug === $brand_slug
+        || strpos($category_slug, $brand_slug . '-') === 0
+        || substr($category_slug, -strlen('-' . $brand_slug)) === '-' . $brand_slug
+        || strpos($category_slug, '-' . $brand_slug . '-') !== false;
+}
+}
+
+if (!function_exists('dms_ecom_get_linked_categories_for_brand')) {
+function dms_ecom_get_linked_categories_for_brand($brand_slug) {
+    $brand_slug = sanitize_title((string) $brand_slug);
+    if ($brand_slug === '' || !function_exists('get_terms')) {
+        return array('ids' => array(), 'slugs' => array());
+    }
+
+    $terms = get_terms(array(
+        'taxonomy' => 'product_cat',
+        'hide_empty' => false,
+        'update_term_meta_cache' => true,
+        'orderby' => 'menu_order',
+        'order' => 'ASC',
+    ));
+    if (is_wp_error($terms) || empty($terms)) {
+        return array('ids' => array(), 'slugs' => array());
+    }
+
+    $root_ids = array();
+    foreach ((array) $terms as $term) {
+        if (!$term || (function_exists('dms_ecom_is_hidden_term_for_app') && dms_ecom_is_hidden_term_for_app($term, 'product_cat'))) {
+            continue;
+        }
+        if (sanitize_title((string) $term->slug) === $brand_slug) {
+            $root_ids[(int) $term->term_id] = true;
+        }
+    }
+
+    $matched = array();
+    foreach ((array) $terms as $term) {
+        if (!$term || (function_exists('dms_ecom_is_hidden_term_for_app') && dms_ecom_is_hidden_term_for_app($term, 'product_cat'))) {
+            continue;
+        }
+        $term_id = (int) $term->term_id;
+        $is_root = isset($root_ids[$term_id]);
+        $is_child = isset($root_ids[(int) $term->parent]);
+        $is_token_match = dms_ecom_brand_category_slug_matches($term->slug, $brand_slug);
+        if (!$is_root && !$is_child && !$is_token_match) {
+            continue;
+        }
+        $matched[$term_id] = $term;
+    }
+
+    uasort($matched, function($a, $b) use ($root_ids) {
+        $a_root = isset($root_ids[(int) $a->term_id]);
+        $b_root = isset($root_ids[(int) $b->term_id]);
+        if ($a_root !== $b_root) return $a_root ? -1 : 1;
+        $a_order = function_exists('dms_ecom_get_term_meta_value') ? intval(dms_ecom_get_term_meta_value($a->term_id, 'menu_order')) : 0;
+        $b_order = function_exists('dms_ecom_get_term_meta_value') ? intval(dms_ecom_get_term_meta_value($b->term_id, 'menu_order')) : 0;
+        if ($a_order !== $b_order) return $a_order <=> $b_order;
+        $name_compare = strcasecmp((string) $a->name, (string) $b->name);
+        if ($name_compare !== 0) return $name_compare;
+        return ((int) $a->term_id) <=> ((int) $b->term_id);
+    });
+
+    $ids = array();
+    $slugs = array();
+    foreach ($matched as $term) {
+        $ids[] = (int) $term->term_id;
+        $slugs[] = (string) $term->slug;
+    }
+
+    return array('ids' => $ids, 'slugs' => $slugs);
+}
+}
+
 if (!function_exists('dms_get_brands_base')) {
 function dms_get_brands_base($request) {
     if (!function_exists('max')) return array();
@@ -1679,12 +1757,18 @@ function dms_get_brands_base($request) {
             ? dms_ecom_get_visible_term_product_count($tax, $t->term_id, false)
             : intval($t->count);
 
+        $linked_categories = function_exists('dms_ecom_get_linked_categories_for_brand')
+            ? dms_ecom_get_linked_categories_for_brand($t->slug)
+            : array('ids' => array(), 'slugs' => array());
+
         $brands[] = array(
             'id' => $t->term_id,
             'name' => $t->name,
             'slug' => $t->slug,
             'count' => $visible_count,
             'image_url' => function_exists('dms_ecom_resolve_brand_image_url') ? dms_ecom_resolve_brand_image_url($t) : '',
+            'linked_category_ids' => $linked_categories['ids'],
+            'linked_category_slugs' => $linked_categories['slugs'],
             'taxonomy' => $tax,
             'show_in_app' => true,
             'hidden' => false,
