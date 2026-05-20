@@ -399,6 +399,103 @@ if (function_exists('add_action')) {
                 'callback' => 'dms_app_home_banner_rest_response',
                 'permission_callback' => '__return_true'
             ));
+            register_rest_route('dms/v1', '/home-banners', array(
+                'methods' => 'GET',
+                'callback' => 'dms_app_home_banners_rest_response',
+                'permission_callback' => '__return_true'
+            ));
         }
     });
+}
+
+// MULTI-BANNER SUPPORT
+define('DMS_APP_HOME_BANNERS_OPTION', 'dms_app_home_banners_list');
+
+if (!function_exists('dms_app_home_banners_get')) {
+    function dms_app_home_banners_get() {
+        $stored = function_exists('get_option') ? get_option(DMS_APP_HOME_BANNERS_OPTION, array()) : array();
+        if (!is_array($stored)) {
+            $stored = array();
+        }
+        return $stored;
+    }
+}
+
+if (!function_exists('dms_app_home_banners_save')) {
+    function dms_app_home_banners_save($input) {
+        $items = isset($input['items']) && is_array($input['items']) ? $input['items'] : array();
+        $clean_items = array();
+        
+        foreach ($items as $item) {
+            if (!is_array($item)) continue;
+            
+            $clean_item = array(
+                'id' => isset($item['id']) ? sanitize_text_field($item['id']) : uniqid('bn_'),
+                'enabled' => !empty($item['enabled']),
+                'image_id' => isset($item['image_id']) ? absint($item['image_id']) : 0,
+                'image_url' => isset($item['image_url']) ? esc_url_raw($item['image_url']) : '',
+                'title' => isset($item['title']) ? sanitize_text_field($item['title']) : '',
+                'subtitle' => isset($item['subtitle']) ? sanitize_text_field($item['subtitle']) : '',
+                'button_label' => isset($item['button_label']) ? sanitize_text_field($item['button_label']) : '',
+                'action_type' => isset($item['action_type']) ? sanitize_text_field($item['action_type']) : 'none',
+                'action_value' => isset($item['action_value']) ? sanitize_text_field($item['action_value']) : '',
+                'sort_order' => isset($item['sort_order']) ? intval($item['sort_order']) : 0,
+                'starts_at' => isset($item['starts_at']) ? sanitize_text_field($item['starts_at']) : '',
+                'ends_at' => isset($item['ends_at']) ? sanitize_text_field($item['ends_at']) : '',
+                'product_ids' => isset($item['product_ids']) ? array_map('intval', (array)$item['product_ids']) : array(),
+                'updated_at' => current_time('mysql'),
+            );
+            $clean_items[] = $clean_item;
+        }
+        
+        usort($clean_items, function($a, $b) {
+            return $a['sort_order'] - $b['sort_order'];
+        });
+
+        $data = array(
+            'items' => $clean_items,
+            'updated_at' => current_time('mysql'),
+            'revision' => uniqid()
+        );
+
+        if (function_exists('update_option')) {
+            update_option(DMS_APP_HOME_BANNERS_OPTION, $data, false);
+        }
+        return $data;
+    }
+}
+
+if (!function_exists('dms_app_home_banners_admin_payload')) {
+    function dms_app_home_banners_admin_payload() {
+        return dms_app_home_banners_get();
+    }
+}
+
+if (!function_exists('dms_app_home_banners_rest_response')) {
+    function dms_app_home_banners_rest_response() {
+        $data = dms_app_home_banners_get();
+        $items = isset($data['items']) && is_array($data['items']) ? $data['items'] : array();
+        
+        $active_items = array();
+        foreach ($items as $item) {
+            if (empty($item['enabled'])) continue;
+            
+            $image_url = $item['image_url'];
+            if (!empty($item['image_id']) && function_exists('wp_get_attachment_image_url')) {
+                $attachment_url = wp_get_attachment_image_url($item['image_id'], 'full');
+                if ($attachment_url) $image_url = $attachment_url;
+            }
+            
+            if (empty($image_url)) continue;
+            
+            $item['image_url'] = $image_url;
+            $active_items[] = $item;
+        }
+        
+        return array(
+            'items' => $active_items,
+            'updated_at' => $data['updated_at'] ?? current_time('mysql'),
+            'revision' => $data['revision'] ?? uniqid()
+        );
+    }
 }

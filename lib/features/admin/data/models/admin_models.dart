@@ -518,6 +518,166 @@ class AdminHomeBannerModel {
   }
 }
 
+enum AdminBannerActionType {
+  none,
+  category,
+  brand,
+  product,
+  search,
+  internalRoute,
+  externalUrl,
+}
+
+class AdminHomeBannerItemModel {
+  final String id;
+  final bool enabled;
+  final int imageId;
+  final String imageUrl;
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+  final AdminBannerActionType actionType;
+  final String actionValue;
+  final int sortOrder;
+  final String? startsAt;
+  final String? endsAt;
+  final List<int> productIds;
+  final String updatedAt;
+
+  const AdminHomeBannerItemModel({
+    required this.id,
+    required this.enabled,
+    required this.imageId,
+    required this.imageUrl,
+    required this.title,
+    required this.subtitle,
+    required this.buttonLabel,
+    required this.actionType,
+    required this.actionValue,
+    required this.sortOrder,
+    this.startsAt,
+    this.endsAt,
+    required this.productIds,
+    required this.updatedAt,
+  });
+
+  factory AdminHomeBannerItemModel.fromJson(Map<String, dynamic> json) {
+    AdminBannerActionType parseAction(String val) {
+      final v = val.toLowerCase().trim();
+      switch (v) {
+        case 'category':
+          return AdminBannerActionType.category;
+        case 'brand':
+          return AdminBannerActionType.brand;
+        case 'product':
+          return AdminBannerActionType.product;
+        case 'search':
+          return AdminBannerActionType.search;
+        case 'internalroute':
+        case 'internal_route':
+          return AdminBannerActionType.internalRoute;
+        case 'externalurl':
+        case 'external_url':
+          return AdminBannerActionType.externalUrl;
+        default:
+          return AdminBannerActionType.none;
+      }
+    }
+
+    return AdminHomeBannerItemModel(
+      id: TextSanitizer.fix(json['id']),
+      enabled: _toBool(json['enabled'] ?? true),
+      imageId: _toInt(json['image_id']),
+      imageUrl: TextSanitizer.fix(json['image_url']),
+      title: TextSanitizer.fix(json['title']),
+      subtitle: TextSanitizer.fix(json['subtitle']),
+      buttonLabel: TextSanitizer.fix(json['button_label']),
+      actionType: parseAction(json['action_type'] ?? ''),
+      actionValue: TextSanitizer.fix(json['action_value']),
+      sortOrder: _toInt(json['sort_order']),
+      startsAt: json['starts_at'] != null ? TextSanitizer.fix(json['starts_at']) : null,
+      endsAt: json['ends_at'] != null ? TextSanitizer.fix(json['ends_at']) : null,
+      productIds: ((json['product_ids'] as List?) ?? const <dynamic>[])
+          .map(_toInt)
+          .where((id) => id > 0)
+          .toList(),
+      updatedAt: TextSanitizer.fix(json['updated_at']),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    String actionString() {
+      switch (actionType) {
+        case AdminBannerActionType.none:
+          return 'none';
+        case AdminBannerActionType.category:
+          return 'category';
+        case AdminBannerActionType.brand:
+          return 'brand';
+        case AdminBannerActionType.product:
+          return 'product';
+        case AdminBannerActionType.search:
+          return 'search';
+        case AdminBannerActionType.internalRoute:
+          return 'internalRoute';
+        case AdminBannerActionType.externalUrl:
+          return 'externalUrl';
+      }
+    }
+
+    return <String, dynamic>{
+      'id': id,
+      'enabled': enabled,
+      'image_id': imageId,
+      'image_url': imageUrl,
+      'title': title,
+      'subtitle': subtitle,
+      'button_label': buttonLabel,
+      'action_type': actionString(),
+      'action_value': actionValue,
+      'sort_order': sortOrder,
+      if (startsAt != null) 'starts_at': startsAt,
+      if (endsAt != null) 'ends_at': endsAt,
+      'product_ids': productIds,
+      'updated_at': updatedAt,
+    };
+  }
+}
+
+class AdminHomeBannersModel {
+  final List<AdminHomeBannerItemModel> items;
+  final String updatedAt;
+  final String revision;
+
+  const AdminHomeBannersModel({
+    required this.items,
+    required this.updatedAt,
+    required this.revision,
+  });
+
+  factory AdminHomeBannersModel.fromJson(Map<String, dynamic> json) {
+    final rawList = json['items'] ?? json['banners'] ?? json['data'];
+    final itemsList = (rawList as List?) ?? const <dynamic>[];
+
+    return AdminHomeBannersModel(
+      items: itemsList
+          .whereType<Map>()
+          .map((item) => AdminHomeBannerItemModel.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+      updatedAt: TextSanitizer.fix(json['updated_at']),
+      revision: TextSanitizer.fix(json['revision']),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'items': items.map((item) => item.toJson()).toList(),
+      'updated_at': updatedAt,
+      'revision': revision,
+    };
+  }
+}
+
 class AdminHomeLayoutModel {
   final String version;
   final int cacheTtl;

@@ -361,6 +361,57 @@ class AdminRepository {
     );
   }
 
+  Future<AdminHomeBannersModel> fetchHomeBanners() async {
+    try {
+      final response = await _dio.get('/dms/v1/admin/home-banners');
+      final payload = _map(response.data, endpoint: '/dms/v1/admin/home-banners');
+      return AdminHomeBannersModel.fromJson(_detail(payload));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        // Fallback gracefully to single banner if the multi-banner endpoint doesn't exist yet
+        final legacyBanner = await fetchHomeBanner();
+        return AdminHomeBannersModel(
+          items: [
+            if (legacyBanner.enabled || legacyBanner.imageUrl.isNotEmpty)
+              AdminHomeBannerItemModel(
+                id: 'legacy',
+                enabled: legacyBanner.enabled,
+                imageId: legacyBanner.imageId,
+                imageUrl: legacyBanner.imageUrl,
+                title: legacyBanner.title,
+                subtitle: legacyBanner.subtitle,
+                buttonLabel: legacyBanner.buttonLabel,
+                actionType: AdminBannerActionType.none,
+                actionValue: '',
+                sortOrder: 1,
+                productIds: legacyBanner.productIds,
+                updatedAt: '',
+              ),
+          ],
+          updatedAt: '',
+          revision: '',
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<AdminHomeBannersModel> updateHomeBanners(
+    AdminHomeBannersModel banners,
+  ) async {
+    final response = await _dio.post(
+      '/dms/v1/admin/home-banners',
+      data: banners.toJson(),
+    );
+    final payload = _map(response.data, endpoint: '/dms/v1/admin/home-banners');
+    final data = _actionData(payload);
+    return AdminHomeBannersModel.fromJson(
+      Map<String, dynamic>.from(
+        (data['banners'] as Map?) ?? const <String, dynamic>{},
+      ),
+    );
+  }
+
   Future<AdminHomeLayoutModel> fetchHomeLayout() async {
     final response = await _dio.get('/dms/v1/admin/home-layout');
     final payload = _map(response.data, endpoint: '/dms/v1/admin/home-layout');

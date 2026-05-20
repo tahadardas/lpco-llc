@@ -8,6 +8,7 @@ import 'package:lpco_llc/core/storage/storage_service.dart';
 import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
+import 'package:lpco_llc/features/products/data/models/home_banner_model.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 
 enum ProductStatus { initial, loading, loaded, loadingMore, error }

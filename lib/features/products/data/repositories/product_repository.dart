@@ -13,7 +13,8 @@ import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
-
+import 'package:lpco_llc/features/products/data/models/home_banner_model.dart';
+import 'package:lpco_llc/features/admin/data/models/admin_models.dart';
 class HomeBannerData {
   final bool enabled;
   final String imageUrl;
@@ -65,39 +66,7 @@ class HomeBannerData {
   }
 }
 
-class HomeBannerSlideData {
-  final bool enabled;
-  final String imageUrl;
-  final String title;
-  final String subtitle;
-  final String buttonLabel;
-  final String buttonLink;
-  final List<int> productIds;
 
-  const HomeBannerSlideData({
-    required this.enabled,
-    required this.imageUrl,
-    required this.title,
-    required this.subtitle,
-    required this.buttonLabel,
-    required this.buttonLink,
-    required this.productIds,
-  });
-
-  bool get hasImage => imageUrl.isNotEmpty;
-
-  Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'enabled': enabled,
-      'image_url': imageUrl,
-      'title': title,
-      'subtitle': subtitle,
-      'button_label': buttonLabel,
-      'button_link': buttonLink,
-      'product_ids': productIds,
-    };
-  }
-}
 
 class CatalogResponseMeta {
   final int page;
@@ -1078,15 +1047,7 @@ class ProductRepository {
     try {
       final list = jsonDecode(raw) as List;
       return list.whereType<Map>().map((map) {
-        return HomeBannerSlideData(
-          enabled: map['enabled'] == true,
-          imageUrl: (map['image_url'] ?? '').toString(),
-          title: (map['title'] ?? '').toString(),
-          subtitle: (map['subtitle'] ?? '').toString(),
-          buttonLabel: (map['button_label'] ?? '').toString(),
-          buttonLink: (map['button_link'] ?? '').toString(),
-          productIds: _parseProductIds(map['product_ids']),
-        );
+        return HomeBannerSlideData.fromJson(Map<String, dynamic>.from(map));
       }).toList();
     } catch (_) {
       return <HomeBannerSlideData>[];
@@ -1094,17 +1055,13 @@ class ProductRepository {
   }
 
   HomeBannerSlideData _parseSlideData(Map<String, dynamic> map, {bool defaultEnabled = true}) {
-    final enabledRaw = map['enabled'];
-    final enabled = enabledRaw != null ? (enabledRaw == true || enabledRaw == 'true' || enabledRaw == 1) : defaultEnabled;
-    return HomeBannerSlideData(
-      enabled: enabled,
-      imageUrl: _normalizeUrl(map['image_url'] ?? map['image']),
-      title: _normalizeText(map['title']),
-      subtitle: _normalizeText(map['subtitle']),
-      buttonLabel: _normalizeText(map['button_label']),
-      buttonLink: _normalizeUrl(map['button_link'] ?? map['link']),
-      productIds: _parseProductIds(map['product_ids']),
-    );
+    if (!map.containsKey('enabled')) {
+      map['enabled'] = defaultEnabled;
+    }
+    if (!map.containsKey('id')) {
+      map['id'] = '${DateTime.now().microsecondsSinceEpoch}';
+    }
+    return HomeBannerSlideData.fromJson(map);
   }
 
   Future<List<HomeBannerSlideData>> getHomeBannersData({bool guest = true, bool forceRefresh = false}) async {
@@ -1112,7 +1069,7 @@ class ProductRepository {
 
     try {
       final response = await _dioClient.dio.get(
-        '/dms/v1/home-banner',
+        '/dms/v1/home-banners', // First attempt the multi-banner endpoint
         queryParameters: <String, dynamic>{
           if (guest) 'guest': 1,
           if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
@@ -1127,13 +1084,39 @@ class ProductRepository {
           banners.addAll((data['banners'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
         } else if (data.containsKey('data') && data['data'] is List) {
           banners.addAll((data['data'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
-        } else {
-          banners.add(_parseSlideData(Map<String, dynamic>.from(data)));
         }
       } else if (data is List) {
         banners.addAll(data.whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
       }
     } catch (_) {}
+
+    // Fallback to legacy single banner endpoint if the list is empty
+    if (banners.isEmpty) {
+      try {
+        final response = await _dioClient.dio.get(
+          '/dms/v1/home-banner',
+          queryParameters: <String, dynamic>{
+            if (guest) 'guest': 1,
+            if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+          },
+          options: _requestOptions(skipAuth: guest, cachePolicy: CachePolicy.noCache),
+        );
+        final data = response.data;
+        if (data is Map) {
+          if (data.containsKey('items') && data['items'] is List) {
+            banners.addAll((data['items'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+          } else if (data.containsKey('banners') && data['banners'] is List) {
+            banners.addAll((data['banners'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+          } else if (data.containsKey('data') && data['data'] is List) {
+            banners.addAll((data['data'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+          } else {
+            banners.add(_parseSlideData(Map<String, dynamic>.from(data)));
+          }
+        } else if (data is List) {
+          banners.addAll(data.whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+        }
+      } catch (_) {}
+    }
 
     try {
       final response = await _dioClient.dio.get(

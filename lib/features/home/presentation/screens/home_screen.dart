@@ -8,6 +8,8 @@ import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:lpco_llc/app/router/app_routes.dart';
 
+import 'package:lpco_llc/features/admin/data/models/admin_models.dart';
+import 'package:lpco_llc/features/products/data/models/home_banner_model.dart';
 import 'package:lpco_llc/core/theme/app_colors.dart';
 import 'package:lpco_llc/core/theme/app_radius.dart';
 import 'package:lpco_llc/core/theme/app_spacing.dart';
@@ -597,7 +599,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ctaLabel: banner.buttonLabel.isNotEmpty
               ? banner.buttonLabel
               : 'تسوق الآن',
-          onTap: () => _openHeroLink(banner.buttonLink),
+          onTap: () => _resolveBannerAction(banner),
         ),
       );
     }
@@ -668,6 +670,50 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return slides;
+  }
+
+  Future<void> _resolveBannerAction(HomeBannerSlideData banner) async {
+    final actionType = banner.actionType;
+    final actionValue = banner.actionValue.trim();
+
+    if (actionType != AdminBannerActionType.none && actionValue.isNotEmpty) {
+      switch (actionType) {
+        case AdminBannerActionType.category:
+          final id = int.tryParse(actionValue);
+          if (id != null) {
+            context.push(AppRoutePaths.categoryUrl(id));
+            return;
+          }
+          break;
+        case AdminBannerActionType.brand:
+          context.push(AppRoutePaths.brandUrl(actionValue));
+          return;
+        case AdminBannerActionType.product:
+          final id = int.tryParse(actionValue);
+          if (id != null) {
+            context.push(AppRoutePaths.productUrl(id));
+            return;
+          }
+          break;
+        case AdminBannerActionType.search:
+          context.push(AppRoutePaths.searchUrl(query: actionValue));
+          return;
+        case AdminBannerActionType.internalRoute:
+          context.push(actionValue.startsWith('/') ? actionValue : '/$actionValue');
+          return;
+        case AdminBannerActionType.externalUrl:
+          final uri = Uri.tryParse(actionValue);
+          if (uri != null) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+          return;
+        case AdminBannerActionType.none:
+          break;
+      }
+    }
+    
+    // Fallback to old buttonLink parsing
+    await _openHeroLink(banner.buttonLink);
   }
 
   Future<void> _openHeroLink(String rawLink) async {
