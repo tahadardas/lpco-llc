@@ -1,5 +1,6 @@
 import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
+import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart';
 
 class BrandCategoryLinker {
   const BrandCategoryLinker();
@@ -75,6 +76,7 @@ class BrandCategoryLinker {
         linkedById.values,
         allCategories: categories,
         rootCategoryIds: rootCategoryIds,
+        brandSlug: brandSlug,
       ),
       brandSlug: brandSlug,
       rootCategoryIds: rootCategoryIds,
@@ -175,22 +177,53 @@ class BrandCategoryLinker {
     Iterable<CategoryModel> categories, {
     required List<CategoryModel> allCategories,
     required Set<int> rootCategoryIds,
+    required String brandSlug,
   }) sync* {
-    final parentsWithVisibleChildren = allCategories
-        .where((category) => category.count > 0 && category.parentId > 0)
-        .map((category) => category.parentId)
-        .toSet();
+    final parentsWithVisibleChildren = <int>{};
+    for (final category in allCategories) {
+      if (!CatalogVisibilityPolicy.isBaseVisibleCategory(category)) continue;
+      if (category.count > 0 && category.parentId > 0) {
+        parentsWithVisibleChildren.add(category.parentId);
+      }
+    }
+
+    int nonRootVisibleCount = 0;
+    final rootCategoriesWithSameSlug = <CategoryModel>[];
+    final nonRootCategories = <CategoryModel>[];
 
     for (final category in categories) {
-      if (category.count > 0) {
-        yield category;
+      if (!CatalogVisibilityPolicy.isBaseVisibleCategory(category)) continue;
+
+      final isRoot = rootCategoryIds.contains(category.id);
+
+      if (isRoot && normalizeSlug(category.slug) == brandSlug) {
+        rootCategoriesWithSameSlug.add(category);
         continue;
       }
 
-      if (rootCategoryIds.contains(category.id) &&
-          parentsWithVisibleChildren.contains(category.id)) {
-        yield category;
+      if (category.count > 0) {
+        nonRootVisibleCount++;
+        nonRootCategories.add(category);
+        continue;
       }
+
+      if (isRoot && parentsWithVisibleChildren.contains(category.id)) {
+        nonRootVisibleCount++;
+        nonRootCategories.add(category);
+      }
+    }
+
+    final shouldHideRootSlug =
+        rootCategoriesWithSameSlug.isNotEmpty && nonRootVisibleCount > 0;
+
+    if (!shouldHideRootSlug) {
+      for (final root in rootCategoriesWithSameSlug) {
+        yield root;
+      }
+    }
+
+    for (final category in nonRootCategories) {
+      yield category;
     }
   }
 

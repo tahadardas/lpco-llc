@@ -125,14 +125,16 @@ void main() {
     );
     expect(
       find.byKey(
-        const ValueKey<String>('brand_scoped_category_item_deli_1_deli'),
+        const ValueKey<String>(
+          'brand_scoped_category_item_deli_1_deli-calculators',
+        ),
       ),
       findsOneWidget,
     );
     expect(
       find.byKey(
         const ValueKey<String>(
-          'brand_scoped_category_item_deli_2_deli-calculators',
+          'brand_scoped_category_item_deli_2_deli-gel-pens',
         ),
       ),
       findsOneWidget,
@@ -213,7 +215,7 @@ void main() {
       await tester.tap(
         find.byKey(
           const ValueKey<String>(
-            'brand_scoped_category_item_deli_3_deli-gel-pens',
+            'brand_scoped_category_item_deli_2_deli-gel-pens',
           ),
         ),
       );

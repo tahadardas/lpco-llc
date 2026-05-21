@@ -7,12 +7,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lpco_llc/app/app_keys.dart';
 import 'package:lpco_llc/app/router/app_router.dart';
+import 'package:lpco_llc/app/router/app_routes.dart';
 import 'package:lpco_llc/app/theme/lpco_theme.dart';
 import 'package:lpco_llc/core/network/network_cubit.dart';
 import 'package:lpco_llc/core/network/reachability_service.dart';
 import 'package:lpco_llc/core/services/push_notification_service.dart';
+import 'package:lpco_llc/core/session/session_manager.dart';
 import 'package:lpco_llc/core/sync/sync_coordinator.dart';
 import 'package:lpco_llc/core/sync/app_refresh_coordinator.dart';
 import 'package:lpco_llc/core/widgets/network_banner_wrapper.dart';
@@ -112,6 +115,7 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
   DateTime? _lastBackgroundCatalogCheck;
   bool _runtimeBootstrapStarted = false;
   bool _hasAcceptedConsent = true;
+  StreamSubscription<SessionExpiredEvent>? _sessionExpiredSubscription;
 
   @override
   void initState() {
@@ -119,6 +123,29 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
     WidgetsBinding.instance.addObserver(this);
     
     _hasAcceptedConsent = LegalConsentService().hasAcceptedCurrentVersion();
+
+    _sessionExpiredSubscription = SessionManager().expiredEvents.listen((event) {
+      if (kDebugMode) {
+        debugPrint('[SESSION_EXPIRED] Session expired with status code ${event.statusCode}');
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        rootScaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: const Text('انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى.'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'تسجيل الدخول',
+              textColor: Colors.white,
+              onPressed: () {
+                rootScaffoldMessengerKey.currentState?.clearSnackBars();
+                context.go(AppRoutePaths.login);
+              },
+            ),
+          ),
+        );
+      });
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_bootstrapRuntimeServices());
@@ -171,6 +198,7 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _sessionExpiredSubscription?.cancel();
     _networkCubit.close();
     _cartCubit.close();
     _authCubit.close();

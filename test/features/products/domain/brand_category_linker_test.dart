@@ -19,6 +19,8 @@ CategoryModel _category({
   int parentId = 0,
   int menuOrder = 0,
   int count = 1,
+  bool hidden = false,
+  bool showInApp = true,
 }) {
   return CategoryModel(
     id: id,
@@ -28,6 +30,8 @@ CategoryModel _category({
     count: count,
     imageUrl: '',
     menuOrder: menuOrder,
+    hidden: hidden,
+    showInApp: showInApp,
   );
 }
 
@@ -60,7 +64,7 @@ void main() {
         ],
       );
 
-      expect(result.map((category) => category.id), <int>[10, 11]);
+      expect(result.map((category) => category.id), <int>[11]);
     });
 
     test('links deli categories using safe slug tokens', () {
@@ -135,7 +139,20 @@ void main() {
         productDerivedCategoryIds: <int>{1, 2, 999},
       );
 
-      expect(result.map((category) => category.id), <int>[1, 2]);
+      expect(result.map((category) => category.id), <int>[2]);
+    });
+
+    test('includes product-derived categories when root slug is not present', () {
+      final result = _linker.findLinkedCategoriesForBrand(
+        brand: _deli,
+        categories: <CategoryModel>[
+          _category(id: 1, name: 'Pencils', slug: 'pencils'),
+          _category(id: 2, name: 'Generic', slug: 'generic'),
+        ],
+        productDerivedCategoryIds: <int>{1, 2, 999},
+      );
+
+      expect(result.map((category) => category.id), <int>[2, 1]);
     });
 
     test(
@@ -159,7 +176,6 @@ void main() {
         );
 
         expect(result.map((category) => category.id), <int>[
-          10,
           11,
           40,
           20,
@@ -197,7 +213,7 @@ void main() {
         ],
       );
 
-      expect(result.map((category) => category.id), <int>[10, 60, 50, 70]);
+      expect(result.map((category) => category.id), <int>[60, 50, 70]);
     });
 
     test('links zero categories using slug tokens', () {
@@ -267,7 +283,7 @@ void main() {
         ],
       );
 
-      expect(result.map((category) => category.id), <int>[1, 2]);
+      expect(result.map((category) => category.id), <int>[2]);
     });
 
     test('hides empty non-root categories under a brand', () {
@@ -287,7 +303,7 @@ void main() {
       expect(result.map((category) => category.id), <int>[2]);
     });
 
-    test('keeps empty brand root when it owns visible children', () {
+    test('hides empty brand root slug when it has visible children', () {
       final result = _linker.findLinkedCategoriesForBrand(
         brand: _deli,
         categories: <CategoryModel>[
@@ -301,7 +317,7 @@ void main() {
         ],
       );
 
-      expect(result.map((category) => category.id), <int>[10, 11]);
+      expect(result.map((category) => category.id), <int>[11]);
     });
 
     test('product-derived ids link generic categories', () {
@@ -315,6 +331,75 @@ void main() {
       );
 
       expect(result.map((category) => category.id), <int>[42]);
+    });
+
+    test('hides root category with same slug as brand when other categories exist', () {
+      final result = _linker.findLinkedCategoriesForBrand(
+        brand: _deli,
+        categories: <CategoryModel>[
+          _category(id: 10, name: 'Deli', slug: 'deli'),
+          _category(id: 11, name: 'Calculators', slug: 'deli-calculators'),
+        ],
+      );
+
+      expect(result.map((category) => category.id), <int>[11]);
+    });
+
+    test('keeps root category with same slug when it is the only category', () {
+      final result = _linker.findLinkedCategoriesForBrand(
+        brand: _deli,
+        categories: <CategoryModel>[
+          _category(id: 10, name: 'Deli', slug: 'deli'),
+        ],
+      );
+
+      expect(result.map((category) => category.id), <int>[10]);
+    });
+
+    test('excludes hidden categories', () {
+      final result = _linker.findLinkedCategoriesForBrand(
+        brand: _deli,
+        categories: <CategoryModel>[
+          _category(id: 1, name: 'Visible', slug: 'deli-visible'),
+          _category(
+            id: 2,
+            name: 'Hidden',
+            slug: 'deli-hidden',
+            hidden: true,
+          ),
+        ],
+      );
+
+      expect(result.map((category) => category.id), <int>[1]);
+    });
+
+    test('excludes showInApp=false categories', () {
+      final result = _linker.findLinkedCategoriesForBrand(
+        brand: _deli,
+        categories: <CategoryModel>[
+          _category(id: 1, name: 'Visible', slug: 'deli-visible'),
+          _category(
+            id: 2,
+            name: 'No App',
+            slug: 'deli-noapp',
+            showInApp: false,
+          ),
+        ],
+      );
+
+      expect(result.map((category) => category.id), <int>[1]);
+    });
+
+    test('excludes empty name categories', () {
+      final result = _linker.findLinkedCategoriesForBrand(
+        brand: _deli,
+        categories: <CategoryModel>[
+          _category(id: 1, name: 'Visible', slug: 'deli-visible'),
+          _category(id: 2, name: '', slug: 'deli-empty'),
+        ],
+      );
+
+      expect(result.map((category) => category.id), <int>[1]);
     });
   });
 }

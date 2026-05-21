@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 
 class AppConfig {
-  static const bool isDevMode = false;
-
-  static const String prodUrl = 'https://lpco-llc.com';
-  static const String devUrl = 'http://localhost:8000';
-
-  static String get baseUrl => isDevMode ? devUrl : prodUrl;
+  static String get baseUrl => String.fromEnvironment(
+    'BASE_URL',
+    defaultValue: 'https://lpco-llc.com',
+  );
   static String get wpApiBase => '$baseUrl/wp-json';
   static String get dmsApiBase => '$baseUrl/wp-json/dms/v1';
   static String get jwtApiBase => '$baseUrl/wp-json/jwt-auth/v1';

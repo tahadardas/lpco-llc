@@ -1,23 +1,15 @@
 import 'package:flutter/foundation.dart';
-import 'package:lpco_llc/core/local/catalog_local_store.dart';
 import 'package:lpco_llc/core/network/dio_client.dart';
-import 'package:lpco_llc/core/storage/storage_service.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 
 class AppRefreshCoordinator {
   final ProductRepository _repository;
-  final CatalogLocalStore _catalogLocalStore;
-  final StorageService _storageService;
   final DioClient _dioClient;
 
   AppRefreshCoordinator({
     ProductRepository? repository,
-    CatalogLocalStore? catalogLocalStore,
-    StorageService? storageService,
     DioClient? dioClient,
   }) : _repository = repository ?? ProductRepository(),
-       _catalogLocalStore = catalogLocalStore ?? CatalogLocalStore(),
-       _storageService = storageService ?? StorageService(),
        _dioClient = dioClient ?? DioClient();
 
   Future<CatalogRefreshResult> refreshCatalog({
@@ -26,21 +18,16 @@ class AppRefreshCoordinator {
   }) async {
     final sw = Stopwatch();
     if (forceRemote) sw.start();
-    bool cacheCleared = false;
     bool revisionChanged = false;
     String? errorMessage;
 
     if (forceRemote) {
       try {
         revisionChanged = await _repository.syncCatalogRevision(guest: guest);
-        if (revisionChanged) {
-          await _catalogLocalStore.clearAllCatalogProducts();
-          cacheCleared = true;
-          if (kDebugMode) {
-            debugPrint(
-              '[REFRESH_COORDINATOR] Catalog revision changed, cleared local catalog cache',
-            );
-          }
+        if (kDebugMode) {
+          debugPrint(
+            '[REFRESH_COORDINATOR] Catalog revision check: changed=$revisionChanged',
+          );
         }
       } catch (e) {
         errorMessage = 'فحص نسخة الكتالوج: $e';
@@ -68,13 +55,12 @@ class AppRefreshCoordinator {
     if (kDebugMode && forceRemote) {
       debugPrint(
         '[REFRESH_COORDINATOR] refreshCatalog completed in ${durationMs}ms '
-        'revisionChanged=$revisionChanged cacheCleared=$cacheCleared',
+        'revisionChanged=$revisionChanged',
       );
     }
 
     return CatalogRefreshResult(
       success: errorMessage == null,
-      cacheCleared: cacheCleared,
       revisionChanged: revisionChanged,
       errorMessage: errorMessage,
       durationMs: durationMs,
@@ -126,21 +112,16 @@ class AppRefreshCoordinator {
   }) async {
     final sw = Stopwatch();
     if (forceRemote) sw.start();
-    bool cacheCleared = false;
     bool revisionChanged = false;
     String? errorMessage;
 
     if (forceRemote) {
       try {
         revisionChanged = await _repository.syncCatalogRevision(guest: guest);
-        if (revisionChanged) {
-          await _catalogLocalStore.clearAllCatalogProducts();
-          cacheCleared = true;
-          if (kDebugMode) {
-            debugPrint(
-              '[REFRESH_COORDINATOR] Catalog revision changed on scope refresh, cleared cache',
-            );
-          }
+        if (kDebugMode) {
+          debugPrint(
+            '[REFRESH_COORDINATOR] Catalog revision check on scope refresh: changed=$revisionChanged',
+          );
         }
       } catch (e) {
         if (kDebugMode) {
@@ -176,26 +157,16 @@ class AppRefreshCoordinator {
     if (kDebugMode && forceRemote) {
       debugPrint(
         '[REFRESH_COORDINATOR] refreshCurrentScope completed in ${durationMs}ms '
-        'revisionChanged=$revisionChanged cacheCleared=$cacheCleared',
+        'revisionChanged=$revisionChanged',
       );
     }
 
     return CatalogRefreshResult(
       success: errorMessage == null,
-      cacheCleared: cacheCleared,
       revisionChanged: revisionChanged,
       errorMessage: errorMessage,
       durationMs: durationMs,
     );
-  }
-
-  Future<void> clearCatalogCache() async {
-    await _catalogLocalStore.clearAllCatalogProducts();
-    const metaKey = 'catalog_revision::global';
-    await _storageService.saveSyncMeta(metaKey, <String, dynamic>{});
-    if (kDebugMode) {
-      debugPrint('[REFRESH_COORDINATOR] Catalog cache cleared manually');
-    }
   }
 
   Future<void> clearHttpCacheIfPossible() async {
@@ -224,14 +195,12 @@ class AppRefreshCoordinator {
 
 class CatalogRefreshResult {
   final bool success;
-  final bool cacheCleared;
   final bool revisionChanged;
   final String? errorMessage;
   final int? durationMs;
 
   const CatalogRefreshResult({
     required this.success,
-    this.cacheCleared = false,
     this.revisionChanged = false,
     this.errorMessage,
     this.durationMs,
