@@ -2,8 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:pull_to_refresh/pull_to_refresh.dart';
 
 import 'package:lpco_llc/app/router/app_routes.dart';
+import 'package:lpco_llc/core/theme/app_colors.dart';
 import 'package:lpco_llc/core/widgets/app_drawer.dart';
 import 'package:lpco_llc/core/widgets/app_skeleton.dart';
 import 'package:lpco_llc/core/widgets/brand_app_bar.dart';
@@ -24,6 +26,7 @@ class _BrandsScreenState extends State<BrandsScreen> {
   final TextEditingController _searchController = TextEditingController();
   final BrandScopedCategoryResolver _brandCategoryResolver =
       const BrandScopedCategoryResolver();
+  final RefreshController _refreshController = RefreshController();
 
   double _topContentPadding(BuildContext context) {
     return MediaQuery.paddingOf(context).top +
@@ -49,7 +52,21 @@ class _BrandsScreenState extends State<BrandsScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _refreshController.dispose();
     super.dispose();
+  }
+
+  Future<void> _onPullToRefresh() async {
+    await context.read<ProductCubit>().refresh(forceRemote: true);
+    if (!mounted) {
+      return;
+    }
+    final state = context.read<ProductCubit>().state;
+    if (state.status == ProductStatus.error && state.brands.isEmpty) {
+      _refreshController.refreshFailed();
+    } else {
+      _refreshController.refreshCompleted();
+    }
   }
 
   List<BrandModel> _filter(List<BrandModel> visibleBrands) {
@@ -96,7 +113,15 @@ class _BrandsScreenState extends State<BrandsScreen> {
             return AppSkeleton(enabled: true, child: _skeleton());
           }
 
-          return CustomScrollView(
+          return SmartRefresher(
+            controller: _refreshController,
+            enablePullDown: true,
+            onRefresh: _onPullToRefresh,
+            header: const WaterDropHeader(
+              complete: Icon(Icons.check_rounded, color: AppColors.success),
+              failed: Icon(Icons.error_outline, color: AppColors.error),
+            ),
+            child: CustomScrollView(
             slivers: <Widget>[
               SliverToBoxAdapter(
                 child: Padding(
@@ -253,6 +278,7 @@ class _BrandsScreenState extends State<BrandsScreen> {
                 ),
               ],
             ],
+            ),
           );
         },
       ),

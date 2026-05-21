@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
@@ -61,6 +62,27 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     super.dispose();
   }
 
+  Future<void> _refreshProduct() async {
+    try {
+      final isGuest = context.read<AuthCubit>().state is! Authenticated;
+      await context.read<ProductCubit>().refresh(forceRemote: true);
+      final refreshed = await _productRepository.getProductById(
+        widget.product.id,
+        guest: isGuest,
+      );
+      if (!mounted) return;
+      if (refreshed != null) {
+        if (kDebugMode) {
+          debugPrint('[PRODUCT_DETAILS] Product refreshed: id=${refreshed.id}');
+        }
+      }
+    } catch (e) {
+      if (mounted && kDebugMode) {
+        debugPrint('[PRODUCT_DETAILS] Refresh failed: $e');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
@@ -108,32 +130,35 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             ),
           ],
         ),
-        body: ListView(
-          padding: EdgeInsets.fromLTRB(14, 14, 14, 20 + systemBottomInset),
-          children: [
-            _gallery(product),
-            const SizedBox(height: 12),
-            _headerDetails(
-              product: product,
-              price: price,
-              regularPrice: regularPrice,
-              hasDiscount: hasDiscount,
-              isGuest: isGuest,
-              currency: user?.currency ?? 'syp',
-              unitOptions: _unitOptions,
-              selectedUnitType: _selectedUnitType,
-              onUnitSelected: (type) =>
-                  setState(() => _selectedUnitType = type),
-            ),
-            const SizedBox(height: 10),
-            _colorSection(),
-            const SizedBox(height: 10),
-            _attributesSection(),
-            const SizedBox(height: 10),
-            _quantitySection(),
-            const SizedBox(height: 10),
-            _descriptionSection(product),
-          ],
+        body: RefreshIndicator(
+          onRefresh: () => _refreshProduct(),
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(14, 14, 14, 20 + systemBottomInset),
+            children: [
+              _gallery(product),
+              const SizedBox(height: 12),
+              _headerDetails(
+                product: product,
+                price: price,
+                regularPrice: regularPrice,
+                hasDiscount: hasDiscount,
+                isGuest: isGuest,
+                currency: user?.currency ?? 'syp',
+                unitOptions: _unitOptions,
+                selectedUnitType: _selectedUnitType,
+                onUnitSelected: (type) =>
+                    setState(() => _selectedUnitType = type),
+              ),
+              const SizedBox(height: 10),
+              _colorSection(),
+              const SizedBox(height: 10),
+              _attributesSection(),
+              const SizedBox(height: 10),
+              _quantitySection(),
+              const SizedBox(height: 10),
+              _descriptionSection(product),
+            ],
+          ),
         ),
         bottomNavigationBar: SafeArea(
           top: false,

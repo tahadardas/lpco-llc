@@ -309,7 +309,6 @@ class DioClient {
     if (error.type == DioExceptionType.cancel) return false;
 
     final statusCode = error.response?.statusCode ?? 0;
-    // Don't retry client errors except specific ones like 408/429
     if (statusCode >= 400 && statusCode < 500) {
       return statusCode == 408 || statusCode == 429;
     }
@@ -319,8 +318,42 @@ class DioClient {
       DioExceptionType.receiveTimeout => true,
       DioExceptionType.sendTimeout => true,
       DioExceptionType.unknown =>
-        error.error != null, // Network issues usually fall here
+        error.error != null,
       _ => statusCode >= 500,
     };
+  }
+
+  Future<void> clearHttpCache() async {
+    try {
+      final store = cacheOptions.store;
+      if (store != null) {
+        await store.clean(
+          priorityOrBelow: CachePriority.high,
+          staleOnly: false,
+        );
+      }
+      if (kDebugMode) {
+        debugPrint('[DIO_CLIENT] HTTP cache cleared');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[DIO_CLIENT] Failed to clear HTTP cache: $e');
+      }
+    }
+  }
+
+  Options buildNoCacheOptions({
+    bool skipAuth = false,
+    bool skipDeviceToken = false,
+    bool includeDeviceToken = false,
+    Map<String, dynamic>? extra,
+  }) {
+    return buildOptions(
+      skipAuth: skipAuth,
+      skipDeviceToken: skipDeviceToken,
+      includeDeviceToken: includeDeviceToken,
+      cachePolicy: CachePolicy.noCache,
+      extra: extra,
+    );
   }
 }

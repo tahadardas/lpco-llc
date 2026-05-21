@@ -108,7 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onPullToRefresh() async {
-    await context.read<ProductCubit>().refresh();
+    await context.read<ProductCubit>().refresh(forceRemote: true);
     if (!mounted) {
       return;
     }

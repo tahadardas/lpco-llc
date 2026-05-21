@@ -118,7 +118,7 @@ class _CategoriesViewState extends State<_CategoriesView> {
                     const SizedBox(height: 12),
                     FilledButton(
                       onPressed: () =>
-                          context.read<CategoriesCubit>().refresh(),
+                          context.read<CategoriesCubit>().refresh(forceRemote: true),
                       child: const Text('إعادة المحاولة'),
                     ),
                   ],
@@ -141,7 +141,7 @@ class _CategoriesViewState extends State<_CategoriesView> {
                 ..sort(_compareCategoryOrder);
 
           return RefreshIndicator(
-            onRefresh: () => context.read<CategoriesCubit>().refresh(),
+            onRefresh: () => context.read<CategoriesCubit>().refresh(forceRemote: true),
             child: ListView.builder(
               padding: EdgeInsets.fromLTRB(
                 14,

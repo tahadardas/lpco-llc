@@ -139,6 +139,9 @@ class ProductRepository {
   Future<bool> syncCatalogRevision({bool guest = false}) async {
     final reachability = _reachabilityService.current;
     if (reachability.status == ReachabilityStatus.offline) {
+      if (kDebugMode) {
+        debugPrint('[CATALOG_REVISION] offline, skipping version check');
+      }
       return false;
     }
 
@@ -157,12 +160,18 @@ class ProductRepository {
 
       final payload = response.data;
       if (payload is! Map) {
+        if (kDebugMode) {
+          debugPrint('[CATALOG_REVISION] invalid payload type: ${payload.runtimeType}');
+        }
         return false;
       }
 
       final map = Map<String, dynamic>.from(payload);
       final revision = (map['catalog_revision'] ?? '').toString().trim();
       if (revision.isEmpty) {
+        if (kDebugMode) {
+          debugPrint('[CATALOG_REVISION] empty revision in response');
+        }
         return false;
       }
 
@@ -172,19 +181,35 @@ class ProductRepository {
           .toString()
           .trim();
       if (previousRevision == revision) {
+        if (kDebugMode) {
+          debugPrint('[CATALOG_REVISION] unchanged: $revision');
+        }
         return false;
+      }
+
+      if (kDebugMode) {
+        debugPrint(
+          '[CATALOG_REVISION] CHANGED old="$previousRevision" new="$revision" '
+          'products_updated_at="${map['products_updated_at'] ?? ''}" '
+          'categories_updated_at="${map['categories_updated_at'] ?? ''}" '
+          'brands_updated_at="${map['brands_updated_at'] ?? ''}" '
+          'home_updated_at="${map['home_updated_at'] ?? ''}"',
+        );
       }
 
       await _catalogLocalStore.clearAllCatalogProducts();
       await _storageService.saveSyncMeta(metaKey, <String, dynamic>{
         'catalog_revision': revision,
         'products_updated_at': (map['products_updated_at'] ?? '').toString(),
+        'categories_updated_at': (map['categories_updated_at'] ?? '').toString(),
+        'brands_updated_at': (map['brands_updated_at'] ?? '').toString(),
+        'home_updated_at': (map['home_updated_at'] ?? '').toString(),
         'synced_at': DateTime.now().toUtc().toIso8601String(),
       });
 
       if (kDebugMode) {
         debugPrint(
-          '[CATALOG_REVISION] changed $previousRevision -> $revision; cleared catalog product/category/brand cache.',
+          '[CATALOG_REVISION] cleared local catalog cache after revision change',
         );
       }
       return true;
@@ -249,6 +274,9 @@ class ProductRepository {
         _isAllStock(stock);
 
     if (reachability.status == ReachabilityStatus.offline) {
+      if (kDebugMode && forceRefresh) {
+        debugPrint('[REPO] getProductsPage offline, using local fallback despite forceRefresh');
+      }
       final fallback = _loadProductsFromLocal(
         scope: scope,
         page: page,
@@ -271,6 +299,9 @@ class ProductRepository {
     }
 
     try {
+      if (kDebugMode && forceRefresh) {
+        debugPrint('[REPO] getProductsPage forceRefresh=true page=$page');
+      }
       final query = <String, dynamic>{
         'page': page,
         'per_page': perPage,
@@ -434,6 +465,9 @@ class ProductRepository {
     final reachability = _reachabilityService.current;
 
     if (reachability.status == ReachabilityStatus.offline) {
+      if (kDebugMode && forceRefresh) {
+        debugPrint('[REPO] searchProductsWithFiltersPage offline, using local fallback despite forceRefresh');
+      }
       final fallback = _searchProductsFromLocal(scope: scope, query: query);
       return CatalogProductsPage(
         products: fallback,
@@ -447,6 +481,9 @@ class ProductRepository {
     }
 
     try {
+      if (kDebugMode && forceRefresh) {
+        debugPrint('[REPO] searchProductsWithFiltersPage forceRefresh=true search="${query.search}"');
+      }
       final params = <String, dynamic>{
         ...query.toQueryParameters(),
         ...await _userScopeQuery(guest: guest),
@@ -673,6 +710,7 @@ class ProductRepository {
     List<int> ids, {
     bool guest = false,
     bool includeGallery = false,
+    bool forceRefresh = false,
   }) async {
     if (ids.isEmpty) {
       return <ProductModel>[];
@@ -708,9 +746,14 @@ class ProductRepository {
       ...scopeQuery,
       if (guest) 'guest': 1,
       if (includeGallery) 'include_gallery': 1,
+      if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
     };
     if (_pricingRev.isNotEmpty) {
       query['pricing_rev'] = _pricingRev;
+    }
+
+    if (kDebugMode && forceRefresh) {
+      debugPrint('[REPO] getProductsByIds forceRefresh=true ids=$ids');
     }
 
     final response = await _dioClient.dio.get(
@@ -1389,6 +1432,18 @@ class ProductRepository {
         .toList(growable: false);
     _logBrandCounts('local cached', brands);
     return brands;
+  }
+
+  Future<({List<BrandModel> brands, bool fromFallback})> getCachedBrandsWithSource({bool guest = false}) async {
+    final scope = await _scopeFor(guest: guest);
+    final local = _catalogLocalStore.getBrands(scope: scope);
+    final brands = local
+        .where((entry) => !_isCategoryHidden(entry))
+        .map(BrandModel.fromJson)
+        .where((brand) => brand.name.isNotEmpty)
+        .toList(growable: false);
+    _logBrandCounts('local cached', brands);
+    return (brands: brands, fromFallback: true);
   }
 
   Future<String> _scopeFor({required bool guest}) async {

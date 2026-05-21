@@ -43,6 +43,25 @@ class _FakeDioClient implements DioClient {
   }
 
   @override
+  Options buildNoCacheOptions({
+    bool skipAuth = false,
+    bool skipDeviceToken = false,
+    bool includeDeviceToken = false,
+    Map<String, dynamic>? extra,
+  }) {
+    return buildOptions(
+      skipAuth: skipAuth,
+      skipDeviceToken: skipDeviceToken,
+      includeDeviceToken: includeDeviceToken,
+      cachePolicy: CachePolicy.noCache,
+      extra: extra,
+    );
+  }
+
+  @override
+  Future<void> clearHttpCache() async {}
+
+  @override
   Future<void> init() async {}
 }
 
@@ -400,6 +419,48 @@ void main() {
 
     expect(store.getCategories(scope: 'guest'), isEmpty);
     expect(store.getBrands(scope: 'guest'), isEmpty);
+  });
+
+  test('getCachedBrands excludes hidden brands', () async {
+    final store = CatalogLocalStore();
+    await store.cacheBrands(
+      scope: 'guest',
+      brands: const <Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': 1,
+          'name': 'Visible Brand',
+          'slug': 'visible',
+          'count': 5,
+          'image_url': '',
+          'show_in_app': true,
+          'hidden': false,
+        },
+        <String, dynamic>{
+          'id': 2,
+          'name': 'Hidden Brand',
+          'slug': 'hidden',
+          'count': 3,
+          'image_url': '',
+          'show_in_app': false,
+          'hidden': true,
+        },
+        <String, dynamic>{
+          'id': 3,
+          'name': 'App Disabled Brand',
+          'slug': 'app-disabled',
+          'count': 2,
+          'image_url': '',
+          'dms_hide_in_app': true,
+        },
+      ],
+    );
+
+    final dio = Dio(BaseOptions(baseUrl: 'https://example.test/wp-json'));
+    final repo = ProductRepository(dioClient: _FakeDioClient(dio));
+    final brands = await repo.getCachedBrands(guest: true);
+
+    expect(brands.length, 1);
+    expect(brands.first.slug, 'visible');
   });
 }
 

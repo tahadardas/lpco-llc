@@ -14,6 +14,7 @@ import 'package:lpco_llc/core/network/network_cubit.dart';
 import 'package:lpco_llc/core/network/reachability_service.dart';
 import 'package:lpco_llc/core/services/push_notification_service.dart';
 import 'package:lpco_llc/core/sync/sync_coordinator.dart';
+import 'package:lpco_llc/core/sync/app_refresh_coordinator.dart';
 import 'package:lpco_llc/core/widgets/network_banner_wrapper.dart';
 import 'package:lpco_llc/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:lpco_llc/features/auth/presentation/screens/security_setup_screen.dart';
@@ -107,6 +108,8 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
   final ProductCubit _productCubit = ProductCubit();
   final NotificationsBadgeCubit _notificationsBadgeCubit =
       NotificationsBadgeCubit();
+  final AppRefreshCoordinator _refreshCoordinator = AppRefreshCoordinator();
+  DateTime? _lastBackgroundCatalogCheck;
   bool _runtimeBootstrapStarted = false;
   bool _hasAcceptedConsent = true;
 
@@ -186,6 +189,47 @@ class _LpcoWholesaleAppState extends State<LpcoWholesaleApp>
 
     if (state == AppLifecycleState.resumed) {
       _authCubit.onAppResumed();
+      _checkCatalogVersionOnResume();
+    }
+  }
+
+  void _checkCatalogVersionOnResume() {
+    final now = DateTime.now();
+    final lastCheck = _lastBackgroundCatalogCheck;
+    if (lastCheck != null && now.difference(lastCheck).inMinutes < 5) {
+      if (kDebugMode) {
+        debugPrint(
+          '[APP_LIFECYCLE] Skipping catalog version check, '
+          'last check was ${now.difference(lastCheck).inMinutes}m ago',
+        );
+      }
+      return;
+    }
+    _lastBackgroundCatalogCheck = now;
+    unawaited(_backgroundCatalogVersionCheck());
+  }
+
+  Future<void> _backgroundCatalogVersionCheck() async {
+    try {
+      final isGuest = _authCubit.state is! Authenticated;
+      final changed = await _refreshCoordinator.checkCatalogVersionChanged(
+        guest: isGuest,
+      );
+      if (changed) {
+        if (kDebugMode) {
+          debugPrint(
+            '[APP_LIFECYCLE] Catalog version changed on resume, '
+            'triggering background refresh',
+          );
+        }
+        await _productCubit.refresh(forceRemote: true);
+      } else if (kDebugMode) {
+        debugPrint('[APP_LIFECYCLE] Catalog version unchanged on resume');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[APP_LIFECYCLE] Background catalog check failed: $e');
+      }
     }
   }
 

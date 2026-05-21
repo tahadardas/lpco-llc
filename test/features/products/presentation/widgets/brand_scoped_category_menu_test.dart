@@ -15,7 +15,7 @@ class _TestSearchFilterCubit extends SearchFilterCubit {
   }
 
   @override
-  Future<void> search({required bool reset, bool persistRecent = true}) async {
+  Future<void> search({required bool reset, bool persistRecent = true, bool forceRefresh = false}) async {
     emit(
       state.copyWith(
         status: SearchFilterStatus.loaded,

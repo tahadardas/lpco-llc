@@ -428,16 +428,31 @@ class ProductCubit extends Cubit<ProductState> {
   }
 
   Future<void> refresh({bool forceRemote = true}) async {
+    if (kDebugMode) {
+      debugPrint('[PRODUCT_CUBIT] refresh forceRemote=$forceRemote');
+    }
     emit(
       state.copyWith(
         page: 1,
-        // Retain existing products to prevent UI flash
         status: ProductStatus.loading,
         initialSyncDone: false,
       ),
     );
     if (forceRemote) {
-      await _repository.syncCatalogRevision(guest: state.isGuest);
+      bool revisionChanged = false;
+      try {
+        revisionChanged = await _repository.syncCatalogRevision(guest: state.isGuest);
+        if (kDebugMode) {
+          debugPrint('[PRODUCT_CUBIT] syncCatalogRevision result: changed=$revisionChanged');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[PRODUCT_CUBIT] syncCatalogRevision failed: $e');
+        }
+      }
+      if (revisionChanged && kDebugMode) {
+        debugPrint('[PRODUCT_CUBIT] Catalog revision changed, clearing cached data for fresh fetch');
+      }
     }
     await initialize(forceRefresh: forceRemote);
   }

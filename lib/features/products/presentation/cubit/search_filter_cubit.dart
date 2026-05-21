@@ -267,8 +267,23 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
     await search(reset: true, persistRecent: false);
   }
 
-  Future<void> refresh() async {
-    await search(reset: true);
+  Future<void> refresh({bool forceRemote = true}) async {
+    if (kDebugMode) {
+      debugPrint('[SEARCH_FILTER_CUBIT] refresh forceRemote=$forceRemote');
+    }
+    if (forceRemote) {
+      try {
+        final revisionChanged = await _repository.syncCatalogRevision(guest: state.isGuest);
+        if (kDebugMode) {
+          debugPrint('[SEARCH_FILTER_CUBIT] syncCatalogRevision result: changed=$revisionChanged');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SEARCH_FILTER_CUBIT] syncCatalogRevision failed: $e');
+        }
+      }
+    }
+    await search(reset: true, forceRefresh: forceRemote);
   }
 
   void onSearchChanged(String value) {
@@ -470,7 +485,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
     _emitSafe(state.copyWith(recentSearches: const <String>[]));
   }
 
-  Future<void> search({required bool reset, bool persistRecent = true}) async {
+  Future<void> search({required bool reset, bool persistRecent = true, bool forceRefresh = false}) async {
     if (isClosed) return;
     final runId = ++_requestId;
     final requestQuery = reset ? state.query.copyWith(page: 1) : state.query;
@@ -557,6 +572,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
       var useBrandOnlyCuratedFallback = false;
       var fetchedPage = await _fetchProductsPageForQuery(
         _queryForRepository(effectiveRequestQuery),
+        forceRefresh: forceRefresh,
       );
       var fetched = fetchedPage.products;
       _logBrandOrder('remote ids=${_idsForLog(fetched)}', requestQuery);
@@ -584,6 +600,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
             effectiveRequestQuery,
             brandOnlyCuratedFallback: true,
           ),
+          forceRefresh: forceRefresh,
         );
         fetched = fetchedPage.products;
         searchedProducts = strictSearch
@@ -617,6 +634,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
             effectiveRequestQuery,
             brandOnlyCuratedFallback: useBrandOnlyCuratedFallback,
           ),
+          forceRefresh: forceRefresh,
         );
         fetched = <ProductModel>[...fetched, ...fetchedPage.products];
         searchedProducts = strictSearch
@@ -940,11 +958,13 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
   }
 
   Future<CatalogProductsPage> _fetchProductsPageForQuery(
-    ProductSearchQuery requestQuery,
-  ) async {
+    ProductSearchQuery requestQuery, {
+    bool forceRefresh = false,
+  }) async {
     return _repository.searchProductsWithFiltersPage(
       query: requestQuery,
       guest: state.isGuest,
+      forceRefresh: forceRefresh,
     );
   }
 

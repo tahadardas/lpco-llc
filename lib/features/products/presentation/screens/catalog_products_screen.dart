@@ -855,7 +855,7 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
               Text(state.errorMessage, textAlign: TextAlign.center),
               const SizedBox(height: 10),
               FilledButton(
-                onPressed: () => _searchFilterCubit.refresh(),
+                onPressed: () => _searchFilterCubit.refresh(forceRemote: true),
                 child: const Text('إعادة المحاولة'),
               ),
             ],
@@ -874,7 +874,7 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
     return Stack(
       children: [
         RefreshIndicator(
-          onRefresh: () => _searchFilterCubit.refresh(),
+          onRefresh: () => _searchFilterCubit.refresh(forceRemote: true),
           child: CustomScrollView(
             controller: _scrollController,
             slivers: [

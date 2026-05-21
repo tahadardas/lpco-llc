@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:lpco_llc/core/network/api_contract.dart';
 
@@ -83,5 +84,10 @@ class CategoriesCubit extends Cubit<CategoriesState> {
     }
   }
 
-  Future<void> refresh() => initialize(forceRefresh: true);
+  Future<void> refresh({bool forceRemote = true}) async {
+    if (kDebugMode) {
+      debugPrint('[CATEGORIES_CUBIT] refresh forceRemote=$forceRemote');
+    }
+    await initialize(forceRefresh: forceRemote);
+  }
 }
