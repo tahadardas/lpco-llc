@@ -12,6 +12,33 @@ import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/categories_cubit.dart';
 
+/// A child category is visible if it is not hidden, shown in app, and has products.
+bool _isVisibleChild(CategoryModel c) {
+  return !c.hidden && c.showInApp && c.count > 0;
+}
+
+/// Returns only the visible children for a given parent from [childrenMap].
+List<CategoryModel> _getVisibleChildren(
+  Map<int, List<CategoryModel>> childrenMap,
+  int parentId,
+) {
+  final raw = childrenMap[parentId];
+  if (raw == null || raw.isEmpty) return const <CategoryModel>[];
+  return raw.where(_isVisibleChild).toList(growable: false);
+}
+
+/// A parent category is visible if not hidden, shown in app, and either
+/// has products itself or has at least one visible child.
+bool _isVisibleParent(
+  CategoryModel c,
+  Map<int, List<CategoryModel>> childrenMap,
+) {
+  if (c.hidden || !c.showInApp) return false;
+  if (c.count > 0) return true;
+  // Show parent with count==0 only if it has visible children
+  return _getVisibleChildren(childrenMap, c.id).isNotEmpty;
+}
+
 Map<int, List<CategoryModel>> _buildChildrenMap(
   List<CategoryModel> categories,
 ) {
@@ -131,14 +158,17 @@ class _CategoriesViewState extends State<_CategoriesView> {
           }
 
           final categories = state.categories;
-          final mainCategories =
-              categories.where((c) => c.parentId <= 0).toList()..sort((a, b) {
-                if (a.menuOrder != b.menuOrder) {
-                  return a.menuOrder.compareTo(b.menuOrder);
-                }
-                return a.name.compareTo(b.name);
-              });
           final childrenMap = _buildChildrenMap(categories);
+          final mainCategories = categories
+              .where((c) => c.parentId <= 0)
+              .where((c) => _isVisibleParent(c, childrenMap))
+              .toList()
+            ..sort((a, b) {
+              if (a.menuOrder != b.menuOrder) {
+                return a.menuOrder.compareTo(b.menuOrder);
+              }
+              return a.name.compareTo(b.name);
+            });
 
           return RefreshIndicator(
             onRefresh: () => context.read<CategoriesCubit>().refresh(),
@@ -164,9 +194,12 @@ class _CategoriesViewState extends State<_CategoriesView> {
 
                 final parent = mainCategories[index - 1];
                 final children =
-                    childrenMap[parent.id] ?? const <CategoryModel>[];
+                    _getVisibleChildren(childrenMap, parent.id);
                 final isExpanded = _expandedIds.contains(parent.id);
                 final hasChildren = children.isNotEmpty;
+                // If parent count==0 (only shown because of visible children),
+                // tapping the card body should toggle children, not open empty products.
+                final parentHasOwnProducts = parent.count > 0;
 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -177,7 +210,9 @@ class _CategoriesViewState extends State<_CategoriesView> {
                         category: parent,
                         hasChildren: hasChildren,
                         isExpanded: isExpanded,
-                        onTap: () => _openCategory(parent),
+                        onTap: parentHasOwnProducts
+                            ? () => _openCategory(parent)
+                            : () => _toggleExpand(parent.id),
                         onArrowTap: hasChildren
                             ? () => _toggleExpand(parent.id)
                             : null,

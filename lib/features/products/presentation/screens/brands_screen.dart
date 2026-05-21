@@ -50,12 +50,22 @@ class _BrandsScreenState extends State<BrandsScreen> {
     super.dispose();
   }
 
+  /// A brand is visible if it is not hidden, shown in app, and has products.
+  bool _isVisibleBrand(BrandModel b) {
+    return !b.hidden && b.showInApp && b.count > 0;
+  }
+
+  List<BrandModel> _filterVisible(List<BrandModel> brands) {
+    return brands.where(_isVisibleBrand).toList(growable: false);
+  }
+
   List<BrandModel> _filter(List<BrandModel> brands) {
+    final visible = _filterVisible(brands);
     final query = _searchController.text.trim().toLowerCase();
     if (query.isEmpty) {
-      return brands;
+      return visible;
     }
-    return brands
+    return visible
         .where((brand) => brand.name.toLowerCase().contains(query))
         .toList(growable: false);
   }
@@ -83,6 +93,7 @@ class _BrandsScreenState extends State<BrandsScreen> {
       drawer: const AppSideDrawer(),
       body: BlocBuilder<ProductCubit, ProductState>(
         builder: (context, state) {
+          final visibleBrands = _filterVisible(state.brands);
           final filtered = _filter(state.brands);
           final isLoading =
               state.status == ProductStatus.loading && state.brands.isEmpty;
@@ -127,7 +138,7 @@ class _BrandsScreenState extends State<BrandsScreen> {
                   onGoHome: () => context.go(AppRoutePaths.home),
                 ),
               ),
-              if (state.brands.isEmpty)
+              if (visibleBrands.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _EmptyBrowseState(
@@ -155,7 +166,7 @@ class _BrandsScreenState extends State<BrandsScreen> {
               else ...<Widget>[
                 SliverToBoxAdapter(
                   child: _TopBrandsStrip(
-                    brands: state.brands.take(12).toList(growable: false),
+                    brands: visibleBrands.take(12).toList(growable: false),
                     onTapBrand: (brand) =>
                         context.push(AppRoutePaths.brandUrl(brand.slug)),
                   ),
@@ -165,7 +176,7 @@ class _BrandsScreenState extends State<BrandsScreen> {
                   sliver: SliverToBoxAdapter(
                     child: _SimpleBrandListTile(
                       title: 'كل العلامات',
-                      subtitle: '${state.brands.length} علامة',
+                      subtitle: '${visibleBrands.length} علامة',
                       onTap: () => context.push(
                         AppRoutePaths.catalogListing(
                           basePath: AppRoutePaths.brandsCatalog,
@@ -198,16 +209,25 @@ class _BrandsScreenState extends State<BrandsScreen> {
                         categories: state.categories,
                         productDerivedCategoryIds: productDerivedCategoryIds,
                       );
+                      // Filter resolved menu to only show categories with actual
+                      // products for this brand.
+                      final filteredMenu = resolvedMenu != null &&
+                              productDerivedCategoryIds.isNotEmpty
+                          ? _brandCategoryResolver.filterByAvailableCategories(
+                              menu: resolvedMenu,
+                              availableCategoryIds: productDerivedCategoryIds,
+                            )
+                          : resolvedMenu;
                       return BrandQuickCategoriesTile(
                         brandSlug: brand.slug,
                         title: brand.name,
                         subtitle: '${brand.count} منتج',
                         imageUrl: brand.imageUrl,
-                        resolvedCuratedMenu: resolvedMenu,
+                        resolvedCuratedMenu: filteredMenu,
                         onTapBrand: () => context.push(
                           AppRoutePaths.brandUrl(normalizedBrandSlug),
                         ),
-                        onTapCategory: resolvedMenu == null
+                        onTapCategory: filteredMenu == null
                             ? null
                             : (cat) => context.push(
                                 AppRoutePaths.brandUrl(
