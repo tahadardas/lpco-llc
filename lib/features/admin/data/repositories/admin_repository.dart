@@ -364,7 +364,10 @@ class AdminRepository {
   Future<AdminHomeBannersModel> fetchHomeBanners() async {
     try {
       final response = await _dio.get('/dms/v1/admin/home-banners');
-      final payload = _map(response.data, endpoint: '/dms/v1/admin/home-banners');
+      final payload = _map(
+        response.data,
+        endpoint: '/dms/v1/admin/home-banners',
+      );
       return AdminHomeBannersModel.fromJson(_detail(payload));
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
@@ -515,7 +518,7 @@ class AdminRepository {
         if (_hasText(category)) 'category': category!.trim(),
         if (_hasText(brand)) 'brand': brand!.trim(),
         if (_hasText(stockStatus)) 'stock_status': stockStatus!.trim(),
-        'featured': ?featured,
+        if (featured != null) 'featured': featured ? 1 : 0,
         if (_hasText(status)) 'status': status!.trim(),
       },
     );

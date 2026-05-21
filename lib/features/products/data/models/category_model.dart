@@ -9,6 +9,8 @@ class CategoryModel {
   final String imageUrl;
   final int menuOrder;
   final bool isFeatured;
+  final bool showInApp;
+  final bool hidden;
 
   const CategoryModel({
     required this.id,
@@ -19,6 +21,8 @@ class CategoryModel {
     required this.imageUrl,
     this.menuOrder = 0,
     this.isFeatured = false,
+    this.showInApp = true,
+    this.hidden = false,
   });
 
   factory CategoryModel.fromJson(Map<String, dynamic> json) {
@@ -53,7 +57,26 @@ class CategoryModel {
       menuOrder: json['menu_order'] is int
           ? json['menu_order'] as int
           : int.tryParse('${json['menu_order'] ?? '0'}') ?? 0,
-      isFeatured: json['is_featured'] == true || json['featured'] == true,
+      isFeatured: _toBool(json['is_featured'] ?? json['featured']),
+      showInApp: json.containsKey('show_in_app')
+          ? _toBool(json['show_in_app'])
+          : !_toBool(json['hidden']),
+      hidden: json.containsKey('hidden')
+          ? _toBool(json['hidden'])
+          : (json.containsKey('show_in_app')
+                ? !_toBool(json['show_in_app'])
+                : false),
     );
+  }
+
+  static bool _toBool(dynamic value) {
+    if (value is bool) {
+      return value;
+    }
+    final normalized = '$value'.trim().toLowerCase();
+    return normalized == '1' ||
+        normalized == 'true' ||
+        normalized == 'yes' ||
+        normalized == 'on';
   }
 }

@@ -30,6 +30,42 @@ import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart
 import 'package:lpco_llc/features/products/presentation/utils/product_share_link.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/product_card.dart';
 
+String? homeHeroInternalRouteForLink(String rawLink) {
+  final link = rawLink.trim();
+  final lower = link.toLowerCase();
+  if (lower.startsWith('product:')) {
+    final id = int.tryParse(lower.replaceFirst('product:', ''));
+    return id == null ? null : AppRoutePaths.productUrl(id);
+  }
+  if (lower.startsWith('category:')) {
+    final id = int.tryParse(lower.replaceFirst('category:', ''));
+    return id == null ? null : AppRoutePaths.categoryUrl(id);
+  }
+  if (lower.startsWith('brand:')) {
+    final slug = lower.replaceFirst('brand:', '').trim();
+    return slug.isEmpty ? null : AppRoutePaths.brandUrl(slug);
+  }
+  if (lower.startsWith('search:')) {
+    final term = lower.replaceFirst('search:', '').trim();
+    return term.isEmpty ? null : AppRoutePaths.searchUrl(query: term);
+  }
+
+  switch (lower) {
+    case 'catalog':
+      return AppRoutePaths.catalog;
+    case 'categories':
+      return AppRoutePaths.categories;
+    case 'brands':
+      return AppRoutePaths.brands;
+    case 'cart':
+      return AppRoutePaths.cart;
+    case 'account':
+      return AppRoutePaths.account;
+  }
+
+  return link.startsWith('/') ? link : null;
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -699,11 +735,13 @@ class _HomeScreenState extends State<HomeScreen> {
           context.push(AppRoutePaths.searchUrl(query: actionValue));
           return;
         case AdminBannerActionType.internalRoute:
-          context.push(actionValue.startsWith('/') ? actionValue : '/$actionValue');
+          context.push(
+            actionValue.startsWith('/') ? actionValue : '/$actionValue',
+          );
           return;
         case AdminBannerActionType.externalUrl:
           final uri = Uri.tryParse(actionValue);
-          if (uri != null) {
+          if (uri != null && uri.scheme.toLowerCase() == 'https') {
             await launchUrl(uri, mode: LaunchMode.externalApplication);
           }
           return;
@@ -711,7 +749,7 @@ class _HomeScreenState extends State<HomeScreen> {
           break;
       }
     }
-    
+
     // Fallback to old buttonLink parsing
     await _openHeroLink(banner.buttonLink);
   }
@@ -723,58 +761,19 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final lower = link.toLowerCase();
-    if (lower.startsWith('product:')) {
-      final id = int.tryParse(lower.replaceFirst('product:', ''));
-      if (id != null) {
-        context.push(AppRoutePaths.productUrl(id));
-        return;
-      }
-    } else if (lower.startsWith('category:')) {
-      final id = int.tryParse(lower.replaceFirst('category:', ''));
-      if (id != null) {
-        context.push(AppRoutePaths.categoryUrl(id));
-        return;
-      }
-    } else if (lower.startsWith('brand:')) {
-      final slug = lower.replaceFirst('brand:', '').trim();
-      if (slug.isNotEmpty) {
-        context.push(AppRoutePaths.brandUrl(slug));
-        return;
-      }
-    } else if (lower.startsWith('search:')) {
-      final term = lower.replaceFirst('search:', '').trim();
-      if (term.isNotEmpty) {
-        context.push(AppRoutePaths.searchUrl(query: term));
-        return;
-      }
-    } else if (lower == 'catalog') {
-      context.push(AppRoutePaths.catalog);
-      return;
-    } else if (lower == 'categories') {
-      context.push(AppRoutePaths.categories);
-      return;
-    } else if (lower == 'brands') {
-      context.push(AppRoutePaths.brands);
-      return;
-    } else if (lower == 'cart') {
-      context.push(AppRoutePaths.cart);
-      return;
-    } else if (lower == 'account') {
-      context.push(AppRoutePaths.account);
+    final internalRoute = homeHeroInternalRouteForLink(link);
+    if (internalRoute != null) {
+      context.push(internalRoute);
       return;
     }
+
+    final lower = link.toLowerCase();
 
     if (lower.startsWith('http://') || lower.startsWith('https://')) {
       final uri = Uri.tryParse(link);
       if (uri != null) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
-      return;
-    }
-
-    if (link.startsWith('/')) {
-      context.push(link);
       return;
     }
 

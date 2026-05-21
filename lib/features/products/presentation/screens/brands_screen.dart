@@ -30,6 +30,21 @@ class _BrandsScreenState extends State<BrandsScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final productCubit = context.read<ProductCubit>();
+      final productState = productCubit.state;
+      if (productState.brands.isEmpty || productState.categories.isEmpty) {
+        productCubit.initialize(forceRefresh: false);
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();

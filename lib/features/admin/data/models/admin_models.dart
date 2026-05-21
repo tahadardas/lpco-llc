@@ -30,10 +30,18 @@ class AdminPagedResponse<T> {
     Map<String, dynamic> json,
     T Function(Map<String, dynamic>) fromItem,
   ) {
+    final data = json['data'];
+    final payload = data is Map ? Map<String, dynamic>.from(data) : json;
     final meta = Map<String, dynamic>.from(
-      (json['meta'] as Map?) ?? const <String, dynamic>{},
+      (payload['meta'] as Map?) ??
+          (json['meta'] as Map?) ??
+          const <String, dynamic>{},
     );
-    final rawItems = (json['items'] as List?) ?? const <dynamic>[];
+    final rawItems =
+        (payload['items'] as List?) ??
+        (payload['data'] as List?) ??
+        (data is List ? data : null) ??
+        const <dynamic>[];
 
     return AdminPagedResponse<T>(
       items: rawItems
@@ -595,8 +603,12 @@ class AdminHomeBannerItemModel {
       actionType: parseAction(json['action_type'] ?? ''),
       actionValue: TextSanitizer.fix(json['action_value']),
       sortOrder: _toInt(json['sort_order']),
-      startsAt: json['starts_at'] != null ? TextSanitizer.fix(json['starts_at']) : null,
-      endsAt: json['ends_at'] != null ? TextSanitizer.fix(json['ends_at']) : null,
+      startsAt: json['starts_at'] != null
+          ? TextSanitizer.fix(json['starts_at'])
+          : null,
+      endsAt: json['ends_at'] != null
+          ? TextSanitizer.fix(json['ends_at'])
+          : null,
       productIds: ((json['product_ids'] as List?) ?? const <dynamic>[])
           .map(_toInt)
           .where((id) => id > 0)
@@ -662,7 +674,11 @@ class AdminHomeBannersModel {
     return AdminHomeBannersModel(
       items: itemsList
           .whereType<Map>()
-          .map((item) => AdminHomeBannerItemModel.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) => AdminHomeBannerItemModel.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
           .toList(),
       updatedAt: TextSanitizer.fix(json['updated_at']),
       revision: TextSanitizer.fix(json['revision']),

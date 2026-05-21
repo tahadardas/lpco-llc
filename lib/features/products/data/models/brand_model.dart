@@ -8,6 +8,9 @@ class BrandModel {
   final String imageUrl;
   final List<int> linkedCategoryIds;
   final List<String> linkedCategorySlugs;
+  final int menuOrder;
+  final bool showInApp;
+  final bool hidden;
 
   const BrandModel({
     required this.id,
@@ -17,6 +20,9 @@ class BrandModel {
     required this.imageUrl,
     this.linkedCategoryIds = const <int>[],
     this.linkedCategorySlugs = const <String>[],
+    this.menuOrder = 0,
+    this.showInApp = true,
+    this.hidden = false,
   });
 
   factory BrandModel.fromJson(Map<String, dynamic> json) {
@@ -45,7 +51,29 @@ class BrandModel {
       imageUrl: resolveImage().trim(),
       linkedCategoryIds: _parseLinkedCategoryIds(json),
       linkedCategorySlugs: _parseLinkedCategorySlugs(json),
+      menuOrder: json['menu_order'] is int
+          ? json['menu_order'] as int
+          : int.tryParse('${json['menu_order'] ?? 0}') ?? 0,
+      showInApp: json.containsKey('show_in_app')
+          ? _toBool(json['show_in_app'])
+          : !_toBool(json['hidden']),
+      hidden: json.containsKey('hidden')
+          ? _toBool(json['hidden'])
+          : (json.containsKey('show_in_app')
+                ? !_toBool(json['show_in_app'])
+                : false),
     );
+  }
+
+  static bool _toBool(dynamic value) {
+    if (value is bool) {
+      return value;
+    }
+    final normalized = '$value'.trim().toLowerCase();
+    return normalized == '1' ||
+        normalized == 'true' ||
+        normalized == 'yes' ||
+        normalized == 'on';
   }
 
   static List<int> _parseLinkedCategoryIds(Map<String, dynamic> json) {

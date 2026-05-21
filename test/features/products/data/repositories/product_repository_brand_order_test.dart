@@ -118,6 +118,42 @@ class _BrandsAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _CategoriesAdapter implements HttpClientAdapter {
+  final List<String> paths = <String>[];
+  final List<Map<String, dynamic>> queries = <Map<String, dynamic>>[];
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    paths.add(options.path);
+    queries.add(Map<String, dynamic>.from(options.queryParameters));
+    return ResponseBody.fromString(
+      jsonEncode(<Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': 7,
+          'name': 'Stationery',
+          'slug': 'stationery',
+          'parent': 0,
+          'count': 3,
+          'image_url': '',
+          'show_in_app': true,
+          'hidden': false,
+        },
+      ]),
+      200,
+      headers: <String, List<String>>{
+        Headers.contentTypeHeader: <String>['application/json; charset=utf-8'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -258,6 +294,74 @@ void main() {
     expect(brands.map((brand) => brand.slug), <String>['deli']);
     expect(adapter.paths.first, '/dms/v1/brands');
     expect(adapter.queries.first['per_page'], 50);
+  });
+
+  test('guest category fetch uses guest categories endpoint first', () async {
+    final adapter = _CategoriesAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'https://example.test/wp-json'));
+    dio.httpClientAdapter = adapter;
+    final repository = ProductRepository(dioClient: _FakeDioClient(dio));
+
+    final categories = await repository.getCategories(guest: true);
+
+    expect(categories.map((category) => category.slug), <String>['stationery']);
+    expect(adapter.paths.first, '/dms/v1/categories-guest');
+    expect(adapter.queries.first['guest'], 1);
+  });
+
+  test(
+    'authenticated category fetch uses auth categories endpoint first',
+    () async {
+      final adapter = _CategoriesAdapter();
+      final dio = Dio(BaseOptions(baseUrl: 'https://example.test/wp-json'));
+      dio.httpClientAdapter = adapter;
+      final repository = ProductRepository(dioClient: _FakeDioClient(dio));
+
+      final categories = await repository.getCategories();
+
+      expect(categories.map((category) => category.slug), <String>[
+        'stationery',
+      ]);
+      expect(adapter.paths.first, '/dms/v1/categories');
+      expect(adapter.queries.first.containsKey('guest'), isFalse);
+    },
+  );
+
+  test('cached brands exclude hidden and app-disabled entries', () async {
+    await CatalogLocalStore().cacheBrands(
+      scope: 'guest',
+      brands: const <Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': 1,
+          'name': 'Visible',
+          'slug': 'visible',
+          'count': 2,
+          'image_url': '',
+          'show_in_app': true,
+          'hidden': false,
+        },
+        <String, dynamic>{
+          'id': 2,
+          'name': 'Hidden',
+          'slug': 'hidden',
+          'count': 2,
+          'image_url': '',
+          'hidden': true,
+        },
+        <String, dynamic>{
+          'id': 3,
+          'name': 'Disabled',
+          'slug': 'disabled',
+          'count': 2,
+          'image_url': '',
+          'show_in_app': false,
+        },
+      ],
+    );
+
+    final brands = await ProductRepository().getCachedBrands(guest: true);
+
+    expect(brands.map((brand) => brand.slug), <String>['visible']);
   });
 
   test('catalog revision cache clear removes stale term counts', () async {

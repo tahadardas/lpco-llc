@@ -14,7 +14,6 @@ import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
 import 'package:lpco_llc/features/products/data/models/home_banner_model.dart';
-import 'package:lpco_llc/features/admin/data/models/admin_models.dart';
 class HomeBannerData {
   final bool enabled;
   final String imageUrl;

@@ -174,19 +174,6 @@ add_action('rest_api_init', function () {
         ),
     ));
 
-    register_rest_route('dms/v1/admin', '/home-banners', array(
-        array(
-            'methods' => WP_REST_Server::READABLE,
-            'callback' => 'dms_admin_get_home_banners_v2',
-            'permission_callback' => 'dms_admin_permissions',
-        ),
-        array(
-            'methods' => WP_REST_Server::CREATABLE,
-            'callback' => 'dms_admin_save_home_banners_v2',
-            'permission_callback' => 'dms_admin_permissions',
-        ),
-    ));
-
     register_rest_route('dms/v1/admin', '/home-layout', array(
         array(
             'methods' => WP_REST_Server::READABLE,
@@ -2326,20 +2313,6 @@ if (!function_exists('dms_admin_save_home_banner_v2')) {
         $saved = function_exists('dms_app_home_banner_save') ? dms_app_home_banner_save($body) : array();
         $payload = function_exists('dms_app_home_banner_admin_payload') ? dms_app_home_banner_admin_payload() : $saved;
         return dms_admin_action_response('تم حفظ بانر الرئيسية بنجاح.', array('banner' => $payload));
-    }
-}
-
-if (!function_exists('dms_admin_get_home_banners_v2')) {
-    function dms_admin_get_home_banners_v2(WP_REST_Request $request) {
-        return dms_admin_detail_response(function_exists('dms_app_home_banners_admin_payload') ? dms_app_home_banners_admin_payload() : array());
-    }
-}
-
-if (!function_exists('dms_admin_save_home_banners_v2')) {
-    function dms_admin_save_home_banners_v2(WP_REST_Request $request) {
-        $body = dms_admin_request_body_v2($request);
-        $saved = function_exists('dms_app_home_banners_save') ? dms_app_home_banners_save($body) : array();
-        return dms_admin_action_response('تم حفظ بانرات الرئيسية بنجاح.', $saved);
     }
 }
 

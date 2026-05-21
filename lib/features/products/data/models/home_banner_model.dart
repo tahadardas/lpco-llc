@@ -4,6 +4,7 @@ import 'package:lpco_llc/features/admin/data/models/admin_models.dart';
 class HomeBannerSlideData {
   final String id;
   final bool enabled;
+  final int imageId;
   final String imageUrl;
   final String title;
   final String subtitle;
@@ -12,12 +13,15 @@ class HomeBannerSlideData {
   final String actionValue;
   final String buttonLink;
   final int sortOrder;
+  final String startsAt;
+  final String endsAt;
   final List<int> productIds;
   final String updatedAt;
 
   const HomeBannerSlideData({
     required this.id,
     required this.enabled,
+    required this.imageId,
     required this.imageUrl,
     required this.title,
     required this.subtitle,
@@ -26,6 +30,8 @@ class HomeBannerSlideData {
     required this.actionValue,
     required this.buttonLink,
     required this.sortOrder,
+    required this.startsAt,
+    required this.endsAt,
     required this.productIds,
     required this.updatedAt,
   });
@@ -53,13 +59,14 @@ class HomeBannerSlideData {
       }
     }
 
-    final bool isEnabled = json.containsKey('enabled') 
+    final bool isEnabled = json.containsKey('enabled')
         ? (json['enabled'] == true || '${json['enabled']}' == '1')
         : true;
 
     return HomeBannerSlideData(
       id: TextSanitizer.fix(json['id']),
       enabled: isEnabled,
+      imageId: int.tryParse('${json['image_id'] ?? 0}') ?? 0,
       imageUrl: TextSanitizer.fix(json['image_url'] ?? json['image']),
       title: TextSanitizer.fix(json['title']),
       subtitle: TextSanitizer.fix(json['subtitle']),
@@ -68,6 +75,8 @@ class HomeBannerSlideData {
       actionValue: TextSanitizer.fix(json['action_value']),
       buttonLink: TextSanitizer.fix(json['button_link'] ?? json['link']),
       sortOrder: int.tryParse('${json['sort_order'] ?? json['order']}') ?? 0,
+      startsAt: TextSanitizer.fix(json['starts_at']),
+      endsAt: TextSanitizer.fix(json['ends_at']),
       productIds: ((json['product_ids'] as List?) ?? const <dynamic>[])
           .map((e) => int.tryParse('$e') ?? 0)
           .where((id) => id > 0)
@@ -99,6 +108,7 @@ class HomeBannerSlideData {
     return <String, dynamic>{
       'id': id,
       'enabled': enabled,
+      'image_id': imageId,
       'image_url': imageUrl,
       'title': title,
       'subtitle': subtitle,
@@ -107,6 +117,8 @@ class HomeBannerSlideData {
       'action_value': actionValue,
       'button_link': buttonLink,
       'sort_order': sortOrder,
+      'starts_at': startsAt,
+      'ends_at': endsAt,
       'product_ids': productIds,
       'updated_at': updatedAt,
     };

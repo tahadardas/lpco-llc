@@ -9,6 +9,7 @@ import 'package:lpco_llc/core/widgets/app_skeleton.dart';
 import 'package:lpco_llc/core/widgets/brand_app_bar.dart';
 import 'package:lpco_llc/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
+import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/categories_cubit.dart';
 
 Map<int, List<CategoryModel>> _buildChildrenMap(
@@ -35,14 +36,20 @@ Map<int, List<CategoryModel>> _buildChildrenMap(
 }
 
 class CategoriesScreen extends StatelessWidget {
-  const CategoriesScreen({super.key});
+  final ProductRepository? repository;
+  final bool? isGuestOverride;
+
+  const CategoriesScreen({super.key, this.repository, this.isGuestOverride});
 
   @override
   Widget build(BuildContext context) {
-    final isGuest = context.read<AuthCubit>().state is! Authenticated;
+    final isGuest =
+        isGuestOverride ?? context.read<AuthCubit>().state is! Authenticated;
 
     return BlocProvider(
-      create: (_) => CategoriesCubit(isGuest: isGuest)..initialize(),
+      create: (_) =>
+          CategoriesCubit(repository: repository, isGuest: isGuest)
+            ..initialize(),
       child: const _CategoriesView(),
     );
   }
@@ -124,10 +131,8 @@ class _CategoriesViewState extends State<_CategoriesView> {
           }
 
           final categories = state.categories;
-          final mainCategories = categories
-              .where((c) => c.parentId <= 0)
-              .toList()
-              ..sort((a, b) {
+          final mainCategories =
+              categories.where((c) => c.parentId <= 0).toList()..sort((a, b) {
                 if (a.menuOrder != b.menuOrder) {
                   return a.menuOrder.compareTo(b.menuOrder);
                 }

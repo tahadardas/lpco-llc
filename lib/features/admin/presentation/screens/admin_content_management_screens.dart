@@ -341,7 +341,7 @@ class _AdminBannerEditDialogState extends State<_AdminBannerEditDialog> {
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<AdminBannerActionType>(
-              value: _actionType,
+              initialValue: _actionType,
               decoration: const InputDecoration(labelText: 'إجراء الزر'),
               items: AdminBannerActionType.values.map((type) {
                 String label = '';
