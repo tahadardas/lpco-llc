@@ -234,34 +234,40 @@ class _BrandsScreenState extends State<BrandsScreen> {
                               .map((item) => item.categoryId)
                               .toSet() ??
                           const <int>{};
-                      final finalAvailableCategoryIds =
-                          productDerivedCategoryIds.isNotEmpty
-                          ? productDerivedCategoryIds
-                          : fallbackAvailableCategoryIds;
+                      final finalAvailableCategoryIds = <int>{
+                        ...fallbackAvailableCategoryIds,
+                        ...productDerivedCategoryIds,
+                      };
                       final filteredMenu = rawResolvedMenu == null
                           ? null
                           : _brandCategoryResolver.filterByAvailableCategories(
                               menu: rawResolvedMenu,
                               availableCategoryIds: finalAvailableCategoryIds,
                             );
+                      final displayedMenu =
+                          filteredMenu ?? rawResolvedMenu;
+                      _logBrandCategoryResolution(
+                        brandSlug: normalizedBrandSlug,
+                        brandName: brand.name,
+                        rawMenu: rawResolvedMenu,
+                        productDerivedCategoryIds: productDerivedCategoryIds,
+                        fallbackAvailableCategoryIds:
+                            fallbackAvailableCategoryIds,
+                        finalAvailableCategoryIds: finalAvailableCategoryIds,
+                        displayedMenu: displayedMenu,
+                      );
                       return BrandQuickCategoriesTile(
                         brandSlug: brand.slug,
                         title: brand.name,
                         subtitle: '${brand.count} منتج',
                         imageUrl: brand.imageUrl,
-                        resolvedCuratedMenu: filteredMenu,
+                        resolvedCuratedMenu: displayedMenu,
                         onTapBrand: () {
-                          _logBrandCategoryResolution(
-                            brandSlug: normalizedBrandSlug,
-                            rawMenu: rawResolvedMenu,
-                            productDerivedCategoryIds:
-                                productDerivedCategoryIds,
-                          );
                           context.push(
                             AppRoutePaths.brandUrl(normalizedBrandSlug),
                           );
                         },
-                        onTapCategory: filteredMenu == null
+                        onTapCategory: displayedMenu == null
                             ? null
                             : (cat) => context.push(
                                 AppRoutePaths.brandUrl(
@@ -287,22 +293,45 @@ class _BrandsScreenState extends State<BrandsScreen> {
 
   void _logBrandCategoryResolution({
     required String brandSlug,
+    required String brandName,
     required ResolvedBrandScopedCategoryMenu? rawMenu,
     required Set<int> productDerivedCategoryIds,
+    required Set<int> fallbackAvailableCategoryIds,
+    required Set<int> finalAvailableCategoryIds,
+    required ResolvedBrandScopedCategoryMenu? displayedMenu,
   }) {
     if (!kDebugMode) {
       return;
     }
 
-    final matchedSlugs =
+    final rawSlugs =
         rawMenu?.items
             .map((item) => item.categorySlug)
             .toList(growable: false) ??
         const <String>[];
+    final displayedSlugs =
+        displayedMenu?.items
+            .map((item) => item.categorySlug)
+            .toList(growable: false) ??
+        const <String>[];
+
     debugPrint(
-      '[BRAND_CATEGORY_LINK] brandSlug=$brandSlug '
-      'matchedCategorySlugs=$matchedSlugs '
-      'productDerivedCategoryIds=$productDerivedCategoryIds',
+      '[BRAND_CATEGORY_LINK] brand="$brandName" slug=$brandSlug',
+    );
+    debugPrint(
+      '[BRAND_CATEGORY_LINK]   rawResolvedMenu slugs: $rawSlugs',
+    );
+    debugPrint(
+      '[BRAND_CATEGORY_LINK]   productDerivedCategoryIds: $productDerivedCategoryIds',
+    );
+    debugPrint(
+      '[BRAND_CATEGORY_LINK]   fallbackAvailableCategoryIds: $fallbackAvailableCategoryIds',
+    );
+    debugPrint(
+      '[BRAND_CATEGORY_LINK]   finalAvailableCategoryIds (union): $finalAvailableCategoryIds',
+    );
+    debugPrint(
+      '[BRAND_CATEGORY_LINK]   final displayed slugs: $displayedSlugs',
     );
   }
 

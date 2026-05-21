@@ -107,11 +107,22 @@ void main() {
         categories: <CategoryModel>[
           _category(id: 1, name: 'Deli calculators', slug: 'calculators'),
           _category(id: 2, name: 'School supplies Deli', slug: 'supplies'),
-          _category(id: 3, name: 'Deliware', slug: 'deliware'),
         ],
       );
 
       expect(result, isEmpty);
+    });
+
+    test('matches concatenated brand slugs at start when brand >= 4 chars', () {
+      final result = _linker.findLinkedCategoriesForBrand(
+        brand: _deli,
+        categories: <CategoryModel>[
+          _category(id: 1, name: 'Deliware', slug: 'deliware'),
+          _category(id: 2, name: 'Deli calculators', slug: 'calculators'),
+        ],
+      );
+
+      expect(result.map((category) => category.id), <int>[1]);
     });
 
     test('includes product-derived categories and deduplicates', () {

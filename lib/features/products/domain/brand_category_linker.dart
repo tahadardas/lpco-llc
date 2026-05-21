@@ -155,10 +155,20 @@ class BrandCategoryLinker {
     if (categorySlug.isEmpty || brandSlug.isEmpty) {
       return false;
     }
-    return categorySlug == brandSlug ||
+    if (categorySlug == brandSlug ||
         categorySlug.startsWith('$brandSlug-') ||
         categorySlug.endsWith('-$brandSlug') ||
-        categorySlug.contains('-$brandSlug-');
+        categorySlug.contains('-$brandSlug-')) {
+      return true;
+    }
+
+    if (brandSlug.length >= 4 &&
+        categorySlug.startsWith(brandSlug) &&
+        categorySlug.length > brandSlug.length) {
+      return true;
+    }
+
+    return false;
   }
 
   Iterable<CategoryModel> _visibleBrandCategories(
