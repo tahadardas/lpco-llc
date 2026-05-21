@@ -120,7 +120,7 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
   static const int _brandListingPerPage = 20;
   static const int _brandCuratedListingPerPage = 100;
   static const int _cachedWarmPerPage = 200;
-  static const int _maxCuratedScanPages = 50;
+  static const int _maxCuratedScanPages = 8;
 
   SearchFilterCubit({
     ProductRepository? repository,
@@ -625,7 +625,8 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
         effectiveFetched = _applyScopedFilters(
           searchedProducts,
           effectiveRequestQuery,
-          backendIncludedCategory: !useBrandOnlyCuratedFallback &&
+          backendIncludedCategory:
+              !useBrandOnlyCuratedFallback &&
               effectiveRequestQuery.categoryIds.any((id) => id > 0),
         );
 
@@ -730,8 +731,11 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
       final searched = strictSearch
           ? _applyStrictSearchFilter(cached, requestQuery.search)
           : cached;
-      return _applyScopedFilters(searched, requestQuery,
-          backendIncludedCategory: false);
+      return _applyScopedFilters(
+        searched,
+        requestQuery,
+        backendIncludedCategory: false,
+      );
     } catch (_) {
       return const <ProductModel>[];
     }
@@ -961,9 +965,18 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
     required int scannedRemotePages,
     required bool useBrandOnlyCuratedFallback,
   }) {
-    if (!_hasCuratedSelection(requestQuery) ||
-        !meta.hasMore ||
-        scannedRemotePages >= _maxCuratedScanPages) {
+    if (!_hasCuratedSelection(requestQuery) || !meta.hasMore) {
+      return false;
+    }
+
+    if (scannedRemotePages >= _maxCuratedScanPages) {
+      if (kDebugMode) {
+        debugPrint(
+          '[BRAND_CURATED_SCAN] stopped after $scannedRemotePages pages '
+          'for brand=${requestQuery.extraParams['brand_slug']} '
+          'categoryIds=${requestQuery.categoryIds}; keeping current results.',
+        );
+      }
       return false;
     }
 
@@ -1042,7 +1055,9 @@ class SearchFilterCubit extends Cubit<SearchFilterState> {
     // If the backend already filtered by brand + category, trust its results.
     // The 4-tier client-side filter is only needed when in brand-only fallback
     // mode where the API returned all brand products and we filter locally.
-    if (backendIncludedCategory && hasBrandScope && normalizedCategoryIds.isNotEmpty) {
+    if (backendIncludedCategory &&
+        hasBrandScope &&
+        normalizedCategoryIds.isNotEmpty) {
       if (kDebugMode) {
         debugPrint(
           '[BRAND_CATEGORY_FILTER] trusting backend brand+category result '

@@ -79,7 +79,7 @@ void main() {
       _deliGelCategory,
     ],
     Set<int> selectedCategoryIds = const <int>{},
-    Set<int> productDerivedCategoryIds = const <int>{},
+    Set<int> productDerivedCategoryIds = const <int>{100, 101, 102},
     required FutureOr<void> Function(ResolvedBrandScopedCategoryItem item)
     onSelectCategory,
     required FutureOr<void> Function() onClearCategory,
@@ -136,6 +136,22 @@ void main() {
         ),
       ),
       findsOneWidget,
+    );
+  });
+
+  testWidgets('menu hides slug-only categories without available product ids', (
+    tester,
+  ) async {
+    await pumpMenu(
+      tester,
+      productDerivedCategoryIds: const <int>{},
+      onSelectCategory: (_) async {},
+      onClearCategory: () async {},
+    );
+
+    expect(
+      find.byKey(const ValueKey<String>('brand_scoped_category_menu')),
+      findsNothing,
     );
   });
 

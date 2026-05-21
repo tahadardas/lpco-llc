@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:lpco_llc/core/config/app_config.dart';
 import 'package:lpco_llc/core/network/api_contract.dart';
+import 'package:lpco_llc/core/session/session_manager.dart';
 import 'package:lpco_llc/core/storage/storage_service.dart';
 
 class DioClient {
@@ -162,6 +163,14 @@ class DioClient {
           handler.next(options);
         },
         onError: (error, handler) async {
+          final statusCode = error.response?.statusCode;
+          final skipAuth = error.requestOptions.extra['skipAuth'] == true;
+          if (!skipAuth && (statusCode == 401 || statusCode == 403)) {
+            await SessionManager().expireFromNetworkFailure(
+              statusCode: statusCode!,
+            );
+          }
+
           if (!_shouldRetry(error)) {
             return handler.next(error);
           }

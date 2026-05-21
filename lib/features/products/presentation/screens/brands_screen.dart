@@ -7,6 +7,7 @@ import 'package:lpco_llc/core/widgets/app_drawer.dart';
 import 'package:lpco_llc/core/widgets/app_skeleton.dart';
 import 'package:lpco_llc/core/widgets/brand_app_bar.dart';
 import 'package:lpco_llc/features/products/data/models/brand_model.dart';
+import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/brand_quick_categories_tile.dart';
@@ -50,22 +51,12 @@ class _BrandsScreenState extends State<BrandsScreen> {
     super.dispose();
   }
 
-  /// A brand is visible if it is not hidden, shown in app, and has products.
-  bool _isVisibleBrand(BrandModel b) {
-    return !b.hidden && b.showInApp && b.count > 0;
-  }
-
-  List<BrandModel> _filterVisible(List<BrandModel> brands) {
-    return brands.where(_isVisibleBrand).toList(growable: false);
-  }
-
-  List<BrandModel> _filter(List<BrandModel> brands) {
-    final visible = _filterVisible(brands);
+  List<BrandModel> _filter(List<BrandModel> visibleBrands) {
     final query = _searchController.text.trim().toLowerCase();
     if (query.isEmpty) {
-      return visible;
+      return visibleBrands;
     }
-    return visible
+    return visibleBrands
         .where((brand) => brand.name.toLowerCase().contains(query))
         .toList(growable: false);
   }
@@ -93,8 +84,10 @@ class _BrandsScreenState extends State<BrandsScreen> {
       drawer: const AppSideDrawer(),
       body: BlocBuilder<ProductCubit, ProductState>(
         builder: (context, state) {
-          final visibleBrands = _filterVisible(state.brands);
-          final filtered = _filter(state.brands);
+          final visibleBrands = state.brands
+              .where(CatalogVisibilityPolicy.isVisibleBrand)
+              .toList(growable: false);
+          final filtered = _filter(visibleBrands);
           final isLoading =
               state.status == ProductStatus.loading && state.brands.isEmpty;
 
@@ -209,15 +202,12 @@ class _BrandsScreenState extends State<BrandsScreen> {
                         categories: state.categories,
                         productDerivedCategoryIds: productDerivedCategoryIds,
                       );
-                      // Filter resolved menu to only show categories with actual
-                      // products for this brand.
-                      final filteredMenu = resolvedMenu != null &&
-                              productDerivedCategoryIds.isNotEmpty
-                          ? _brandCategoryResolver.filterByAvailableCategories(
+                      final filteredMenu = resolvedMenu == null
+                          ? null
+                          : _brandCategoryResolver.filterByAvailableCategories(
                               menu: resolvedMenu,
                               availableCategoryIds: productDerivedCategoryIds,
-                            )
-                          : resolvedMenu;
+                            );
                       return BrandQuickCategoriesTile(
                         brandSlug: brand.slug,
                         title: brand.name,

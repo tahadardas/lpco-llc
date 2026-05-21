@@ -43,7 +43,8 @@ class _BrandScopedCategoryMenuState extends State<BrandScopedCategoryMenu> {
 
   @override
   Widget build(BuildContext context) {
-    final menu = BrandScopedCategoryResolver(source: widget.menuSource).resolve(
+    final resolver = BrandScopedCategoryResolver(source: widget.menuSource);
+    final resolvedMenu = resolver.resolve(
       brand: widget.brand,
       brandSlug: widget.brandSlug,
       brandTitle: widget.brandTitle,
@@ -51,6 +52,12 @@ class _BrandScopedCategoryMenuState extends State<BrandScopedCategoryMenu> {
       productDerivedCategoryIds: widget.productDerivedCategoryIds,
       allowConfiguredFallback: widget.allowConfiguredFallback,
     );
+    final menu = resolvedMenu == null
+        ? null
+        : resolver.filterByAvailableCategories(
+            menu: resolvedMenu,
+            availableCategoryIds: widget.productDerivedCategoryIds,
+          );
     if (menu == null || menu.items.isEmpty) {
       return const SizedBox.shrink();
     }

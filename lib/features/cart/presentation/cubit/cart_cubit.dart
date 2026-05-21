@@ -66,6 +66,10 @@ class CartCubit extends Cubit<CartState> {
       return;
     }
 
+    if (_scope == 'guest' && normalized != 'guest') {
+      await _moveGuestCartIntoEmptyScope(normalized);
+    }
+
     _scope = normalized;
     await loadCart();
   }
@@ -125,6 +129,74 @@ class CartCubit extends Cubit<CartState> {
       await cartBox.put('local_cart', encoded);
     }
     emit(CartLoaded(_cloneItems(items)));
+  }
+
+  Future<void> _moveGuestCartIntoEmptyScope(String targetScope) async {
+    final current = state;
+    final guestItems = current is CartLoaded
+        ? _cloneItems(current.items)
+        : _readItemsForScope('guest', includeLegacyFallback: true);
+    if (guestItems.isEmpty) {
+      return;
+    }
+
+    final targetItems = _readItemsForScope(targetScope);
+    if (targetItems.isNotEmpty) {
+      // A non-empty user cart stays authoritative until merge UX is explicit.
+      return;
+    }
+
+    await _writeItemsForScope(targetScope, guestItems);
+    await _writeItemsForScope('guest', const <CartItemModel>[]);
+  }
+
+  List<CartItemModel> _readItemsForScope(
+    String scope, {
+    bool includeLegacyFallback = false,
+  }) {
+    try {
+      final cartBox = _storageService.cartBox;
+      final rawScoped = cartBox.get(_storageService.cartScopeKey(scope));
+      final rawLegacy = includeLegacyFallback
+          ? cartBox.get('local_cart')
+          : null;
+      final raw = rawScoped is String && rawScoped.isNotEmpty
+          ? rawScoped
+          : rawLegacy is String
+          ? rawLegacy
+          : null;
+      if (raw == null || raw.isEmpty) {
+        return <CartItemModel>[];
+      }
+
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return <CartItemModel>[];
+      }
+
+      return decoded
+          .whereType<Map>()
+          .map(
+            (entry) => CartItemModel.fromJson(Map<String, dynamic>.from(entry)),
+          )
+          .toList(growable: true);
+    } catch (_) {
+      return <CartItemModel>[];
+    }
+  }
+
+  Future<void> _writeItemsForScope(
+    String scope,
+    List<CartItemModel> items,
+  ) async {
+    final encoded = jsonEncode(
+      _cloneItems(items).map((item) => item.toJson()).toList(growable: false),
+    );
+    final cartBox = _storageService.cartBox;
+    await cartBox.put(_storageService.cartScopeKey(scope), encoded);
+    if (scope == 'guest') {
+      await cartBox.put('local_cart', encoded);
+    }
   }
 
   Future<void> addToCart(CartItemModel item) async {

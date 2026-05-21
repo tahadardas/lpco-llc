@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:lpco_llc/core/storage/storage_service.dart';
 import 'package:lpco_llc/features/auth/data/models/user_model.dart';
 
@@ -119,13 +121,25 @@ class SessionRestoreResult {
   });
 }
 
+class SessionExpiredEvent {
+  final int statusCode;
+
+  const SessionExpiredEvent({required this.statusCode});
+}
+
 class SessionManager {
   static const Duration onlineValidationInterval = Duration(hours: 6);
+  static final StreamController<SessionExpiredEvent> _sessionExpiredController =
+      StreamController<SessionExpiredEvent>.broadcast();
+  static Future<void>? _networkExpiration;
 
   final SessionStorage _storage;
 
   SessionManager({SessionStorage? storage})
     : _storage = storage ?? StorageServiceSessionStorage();
+
+  Stream<SessionExpiredEvent> get expiredEvents =>
+      _sessionExpiredController.stream;
 
   String buildUserScope(UserModel user) {
     if (user.isGuest) {
@@ -263,6 +277,19 @@ class SessionManager {
     await _storage.clearSessionMetadata();
   }
 
+  Future<void> expireFromNetworkFailure({required int statusCode}) {
+    final inProgress = _networkExpiration;
+    if (inProgress != null) {
+      return inProgress;
+    }
+
+    final expiration = _clearAndNotifyNetworkExpiration(statusCode);
+    _networkExpiration = expiration.whenComplete(() {
+      _networkExpiration = null;
+    });
+    return _networkExpiration!;
+  }
+
   Future<SessionSnapshot?> currentSnapshot() async {
     final user = await _storage.getUser();
     if (user == null) {
@@ -286,5 +313,10 @@ class SessionManager {
 
     final elapsed = DateTime.now().toUtc().difference(validatedAt);
     return elapsed >= onlineValidationInterval;
+  }
+
+  Future<void> _clearAndNotifyNetworkExpiration(int statusCode) async {
+    await clear();
+    _sessionExpiredController.add(SessionExpiredEvent(statusCode: statusCode));
   }
 }

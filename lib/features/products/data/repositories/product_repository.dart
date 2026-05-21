@@ -14,6 +14,7 @@ import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
 import 'package:lpco_llc/features/products/data/models/home_banner_model.dart';
+
 class HomeBannerData {
   final bool enabled;
   final String imageUrl;
@@ -64,8 +65,6 @@ class HomeBannerData {
     );
   }
 }
-
-
 
 class CatalogResponseMeta {
   final int page;
@@ -219,6 +218,7 @@ class ProductRepository {
       orderBy: orderBy,
       order: order,
       guest: guest,
+      forceRefresh: forceRefresh,
     );
     return result.products;
   }
@@ -322,7 +322,7 @@ class ProductRepository {
         queryParameters: query,
         options: _requestOptions(
           skipAuth: guest,
-          cachePolicy: forceRefresh ? CachePolicy.noCache : CachePolicy.noCache, // Wait, it already used noCache? No, wait, if it already uses noCache, that's fine, adding _t forces bypass.
+          cachePolicy: CachePolicy.noCache,
         ),
       );
 
@@ -803,8 +803,8 @@ class ProductRepository {
 
     try {
       final categories = await fromEndpoint(
-        '/dms/v1/categories-guest',
-        skipAuth: true,
+        guest ? '/dms/v1/categories-guest' : '/dms/v1/categories',
+        skipAuth: guest,
       );
       _logCategoryCounts('remote', categories);
       await _catalogLocalStore.cacheCategories(
@@ -827,8 +827,8 @@ class ProductRepository {
     } on DioException catch (_) {
       try {
         final categories = await fromEndpoint(
-          '/dms/v1/categories',
-          skipAuth: guest,
+          guest ? '/dms/v1/categories' : '/dms/v1/categories-guest',
+          skipAuth: true,
         );
         _logCategoryCounts('remote', categories);
         await _catalogLocalStore.cacheCategories(
@@ -1039,7 +1039,9 @@ class ProductRepository {
     }
   }
 
-  Future<List<HomeBannerSlideData>> getCachedHomeBannersData({bool guest = true}) async {
+  Future<List<HomeBannerSlideData>> getCachedHomeBannersData({
+    bool guest = true,
+  }) async {
     final key = 'home_banners_list_${guest ? 'guest' : 'user'}';
     final raw = _storageService.settingsBox.get(key);
     if (raw is! String || raw.isEmpty) return <HomeBannerSlideData>[];
@@ -1053,7 +1055,10 @@ class ProductRepository {
     }
   }
 
-  HomeBannerSlideData _parseSlideData(Map<String, dynamic> map, {bool defaultEnabled = true}) {
+  HomeBannerSlideData _parseSlideData(
+    Map<String, dynamic> map, {
+    bool defaultEnabled = true,
+  }) {
     if (!map.containsKey('enabled')) {
       map['enabled'] = defaultEnabled;
     }
@@ -1063,7 +1068,10 @@ class ProductRepository {
     return HomeBannerSlideData.fromJson(map);
   }
 
-  Future<List<HomeBannerSlideData>> getHomeBannersData({bool guest = true, bool forceRefresh = false}) async {
+  Future<List<HomeBannerSlideData>> getHomeBannersData({
+    bool guest = true,
+    bool forceRefresh = false,
+  }) async {
     final banners = <HomeBannerSlideData>[];
 
     try {
@@ -1073,19 +1081,38 @@ class ProductRepository {
           if (guest) 'guest': 1,
           if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
         },
-        options: _requestOptions(skipAuth: guest, cachePolicy: CachePolicy.noCache),
+        options: _requestOptions(
+          skipAuth: guest,
+          cachePolicy: CachePolicy.noCache,
+        ),
       );
       final data = response.data;
       if (data is Map) {
         if (data.containsKey('items') && data['items'] is List) {
-          banners.addAll((data['items'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+          banners.addAll(
+            (data['items'] as List).whereType<Map>().map(
+              (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+            ),
+          );
         } else if (data.containsKey('banners') && data['banners'] is List) {
-          banners.addAll((data['banners'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+          banners.addAll(
+            (data['banners'] as List).whereType<Map>().map(
+              (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+            ),
+          );
         } else if (data.containsKey('data') && data['data'] is List) {
-          banners.addAll((data['data'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+          banners.addAll(
+            (data['data'] as List).whereType<Map>().map(
+              (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+            ),
+          );
         }
       } else if (data is List) {
-        banners.addAll(data.whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+        banners.addAll(
+          data.whereType<Map>().map(
+            (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+          ),
+        );
       }
     } catch (_) {}
 
@@ -1098,21 +1125,40 @@ class ProductRepository {
             if (guest) 'guest': 1,
             if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
           },
-          options: _requestOptions(skipAuth: guest, cachePolicy: CachePolicy.noCache),
+          options: _requestOptions(
+            skipAuth: guest,
+            cachePolicy: CachePolicy.noCache,
+          ),
         );
         final data = response.data;
         if (data is Map) {
           if (data.containsKey('items') && data['items'] is List) {
-            banners.addAll((data['items'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+            banners.addAll(
+              (data['items'] as List).whereType<Map>().map(
+                (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+              ),
+            );
           } else if (data.containsKey('banners') && data['banners'] is List) {
-            banners.addAll((data['banners'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+            banners.addAll(
+              (data['banners'] as List).whereType<Map>().map(
+                (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+              ),
+            );
           } else if (data.containsKey('data') && data['data'] is List) {
-            banners.addAll((data['data'] as List).whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+            banners.addAll(
+              (data['data'] as List).whereType<Map>().map(
+                (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+              ),
+            );
           } else {
             banners.add(_parseSlideData(Map<String, dynamic>.from(data)));
           }
         } else if (data is List) {
-          banners.addAll(data.whereType<Map>().map((m) => _parseSlideData(Map<String, dynamic>.from(m))));
+          banners.addAll(
+            data.whereType<Map>().map(
+              (m) => _parseSlideData(Map<String, dynamic>.from(m)),
+            ),
+          );
         }
       } catch (_) {}
     }
@@ -1124,7 +1170,10 @@ class ProductRepository {
           if (guest) 'guest': 1,
           if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
         },
-        options: _requestOptions(skipAuth: guest, cachePolicy: CachePolicy.noCache),
+        options: _requestOptions(
+          skipAuth: guest,
+          cachePolicy: CachePolicy.noCache,
+        ),
       );
       final data = response.data;
       if (data is Map && data['sections'] is List) {
@@ -1144,7 +1193,7 @@ class ProductRepository {
       final key = 'home_banners_list_${guest ? 'guest' : 'user'}';
       final listJson = enabledBanners.map((b) => b.toJson()).toList();
       await _storageService.settingsBox.put(key, jsonEncode(listJson));
-      
+
       final first = enabledBanners.first;
       final oldKey = 'home_banner_${guest ? 'guest' : 'user'}';
       await _storageService.settingsBox.put(oldKey, jsonEncode(first.toJson()));
@@ -1153,12 +1202,21 @@ class ProductRepository {
     return enabledBanners;
   }
 
-  Future<HomeBannerData> getHomeBannerData({bool guest = true, bool forceRefresh = false}) async {
-    final primary = await _fromHomeBannerEndpoint(guest: guest, forceRefresh: forceRefresh);
+  Future<HomeBannerData> getHomeBannerData({
+    bool guest = true,
+    bool forceRefresh = false,
+  }) async {
+    final primary = await _fromHomeBannerEndpoint(
+      guest: guest,
+      forceRefresh: forceRefresh,
+    );
     HomeBannerData result = primary;
 
     if (!primary.hasImage) {
-      final layoutBanner = await _fromHomeLayoutEndpoint(guest: guest, forceRefresh: forceRefresh);
+      final layoutBanner = await _fromHomeLayoutEndpoint(
+        guest: guest,
+        forceRefresh: forceRefresh,
+      );
       if (layoutBanner.hasImage) {
         result = layoutBanner.copyWith(
           title: primary.title.isNotEmpty ? primary.title : layoutBanner.title,
@@ -1324,7 +1382,11 @@ class ProductRepository {
   Future<List<BrandModel>> getCachedBrands({bool guest = false}) async {
     final scope = await _scopeFor(guest: guest);
     final local = _catalogLocalStore.getBrands(scope: scope);
-    final brands = local.map(BrandModel.fromJson).toList(growable: false);
+    final brands = local
+        .where((entry) => !_isCategoryHidden(entry))
+        .map(BrandModel.fromJson)
+        .where((brand) => brand.name.isNotEmpty)
+        .toList(growable: false);
     _logBrandCounts('local cached', brands);
     return brands;
   }
@@ -1517,7 +1579,10 @@ class ProductRepository {
     };
   }
 
-  Future<HomeBannerData> _fromHomeBannerEndpoint({required bool guest, bool forceRefresh = false}) async {
+  Future<HomeBannerData> _fromHomeBannerEndpoint({
+    required bool guest,
+    bool forceRefresh = false,
+  }) async {
     try {
       final response = await _dioClient.dio.get(
         '/dms/v1/home-banner',
@@ -1565,7 +1630,10 @@ class ProductRepository {
     }
   }
 
-  Future<HomeBannerData> _fromHomeLayoutEndpoint({required bool guest, bool forceRefresh = false}) async {
+  Future<HomeBannerData> _fromHomeLayoutEndpoint({
+    required bool guest,
+    bool forceRefresh = false,
+  }) async {
     try {
       final response = await _dioClient.dio.get(
         '/dms/v1/app/home-layout',

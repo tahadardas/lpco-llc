@@ -42,33 +42,33 @@ class _AdminHomeBannerScreenState extends State<AdminHomeBannerScreen> {
       final updatedList = <AdminHomeBannerItemModel>[];
       for (int i = 0; i < _banners.length; i++) {
         final b = _banners[i];
-        updatedList.add(AdminHomeBannerItemModel(
-          id: b.id,
-          enabled: b.enabled,
-          imageId: b.imageId,
-          imageUrl: b.imageUrl,
-          title: b.title,
-          subtitle: b.subtitle,
-          buttonLabel: b.buttonLabel,
-          actionType: b.actionType,
-          actionValue: b.actionValue,
-          sortOrder: i,
-          startsAt: b.startsAt,
-          endsAt: b.endsAt,
-          productIds: b.productIds,
-          updatedAt: b.updatedAt,
-        ));
+        updatedList.add(
+          AdminHomeBannerItemModel(
+            id: b.id,
+            enabled: b.enabled,
+            imageId: b.imageId,
+            imageUrl: b.imageUrl,
+            title: b.title,
+            subtitle: b.subtitle,
+            buttonLabel: b.buttonLabel,
+            actionType: b.actionType,
+            actionValue: b.actionValue,
+            sortOrder: i,
+            startsAt: b.startsAt,
+            endsAt: b.endsAt,
+            productIds: b.productIds,
+            updatedAt: b.updatedAt,
+          ),
+        );
       }
-      
+
       await _repository.updateHomeBanners(
-        AdminHomeBannersModel(
-          items: updatedList,
-          updatedAt: '',
-          revision: '',
-        ),
+        AdminHomeBannersModel(items: updatedList, updatedAt: '', revision: ''),
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ البانرات بنجاح.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم حفظ البانرات بنجاح.')));
       setState(() {
         _banners = updatedList;
       });
@@ -78,7 +78,9 @@ class _AdminHomeBannerScreenState extends State<AdminHomeBannerScreen> {
         error,
         fallback: 'تعذر حفظ البانرات حالياً. يرجى إعادة المحاولة.',
       );
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(safeMessage)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(safeMessage)));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -86,20 +88,23 @@ class _AdminHomeBannerScreenState extends State<AdminHomeBannerScreen> {
 
   void _addBanner() {
     setState(() {
-      _banners.insert(0, AdminHomeBannerItemModel(
-        id: 'new_${DateTime.now().millisecondsSinceEpoch}',
-        enabled: true,
-        imageId: 0,
-        imageUrl: '',
-        title: 'بانر جديد',
-        subtitle: '',
-        buttonLabel: 'تسوق الآن',
-        actionType: AdminBannerActionType.none,
-        actionValue: '',
-        sortOrder: 0,
-        productIds: const [],
-        updatedAt: '',
-      ));
+      _banners.insert(
+        0,
+        AdminHomeBannerItemModel(
+          id: 'new_${DateTime.now().millisecondsSinceEpoch}',
+          enabled: true,
+          imageId: 0,
+          imageUrl: '',
+          title: 'بانر جديد',
+          subtitle: '',
+          buttonLabel: 'تسوق الآن',
+          actionType: AdminBannerActionType.none,
+          actionValue: '',
+          sortOrder: 0,
+          productIds: const [],
+          updatedAt: '',
+        ),
+      );
     });
   }
 
@@ -157,7 +162,10 @@ class _AdminHomeBannerScreenState extends State<AdminHomeBannerScreen> {
                   children: <Widget>[
                     const Text(
                       'ترتيب البانرات',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     const Text(
@@ -177,9 +185,8 @@ class _AdminHomeBannerScreenState extends State<AdminHomeBannerScreen> {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: _banners.length,
-                        onReorder: (oldIndex, newIndex) {
+                        onReorderItem: (oldIndex, newIndex) {
                           setState(() {
-                            if (newIndex > oldIndex) newIndex -= 1;
                             final item = _banners.removeAt(oldIndex);
                             _banners.insert(newIndex, item);
                           });
@@ -191,20 +198,34 @@ class _AdminHomeBannerScreenState extends State<AdminHomeBannerScreen> {
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
                               leading: const Icon(Icons.drag_handle_rounded),
-                              title: Text(banner.title.isNotEmpty ? banner.title : 'بدون عنوان'),
+                              title: Text(
+                                banner.title.isNotEmpty
+                                    ? banner.title
+                                    : 'بدون عنوان',
+                              ),
                               subtitle: Text(
                                 banner.enabled ? 'مُفعل' : 'مُعطل',
-                                style: TextStyle(color: banner.enabled ? Colors.green : Colors.red),
+                                style: TextStyle(
+                                  color: banner.enabled
+                                      ? Colors.green
+                                      : Colors.red,
+                                ),
                               ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   IconButton(
-                                    icon: const Icon(Icons.edit_rounded, color: Colors.blue),
+                                    icon: const Icon(
+                                      Icons.edit_rounded,
+                                      color: Colors.blue,
+                                    ),
                                     onPressed: () => _editBanner(index),
                                   ),
                                   IconButton(
-                                    icon: const Icon(Icons.delete_rounded, color: Colors.red),
+                                    icon: const Icon(
+                                      Icons.delete_rounded,
+                                      color: Colors.red,
+                                    ),
                                     onPressed: () => _deleteBanner(index),
                                   ),
                                 ],
@@ -219,7 +240,9 @@ class _AdminHomeBannerScreenState extends State<AdminHomeBannerScreen> {
                       child: FilledButton.icon(
                         onPressed: _saving ? null : _save,
                         icon: const Icon(Icons.save_rounded),
-                        label: Text(_saving ? 'جارٍ الحفظ...' : 'حفظ التعديلات'),
+                        label: Text(
+                          _saving ? 'جارٍ الحفظ...' : 'حفظ التعديلات',
+                        ),
                       ),
                     ),
                   ],
@@ -258,10 +281,16 @@ class _AdminBannerEditDialogState extends State<_AdminBannerEditDialog> {
     _titleController = TextEditingController(text: widget.banner.title);
     _subtitleController = TextEditingController(text: widget.banner.subtitle);
     _imageController = TextEditingController(text: widget.banner.imageUrl);
-    _buttonLabelController = TextEditingController(text: widget.banner.buttonLabel);
+    _buttonLabelController = TextEditingController(
+      text: widget.banner.buttonLabel,
+    );
     _actionType = widget.banner.actionType;
-    _actionValueController = TextEditingController(text: widget.banner.actionValue);
-    _productIdsController = TextEditingController(text: widget.banner.productIds.join(', '));
+    _actionValueController = TextEditingController(
+      text: widget.banner.actionValue,
+    );
+    _productIdsController = TextEditingController(
+      text: widget.banner.productIds.join(', '),
+    );
   }
 
   @override
@@ -337,7 +366,9 @@ class _AdminBannerEditDialogState extends State<_AdminBannerEditDialog> {
             const SizedBox(height: 10),
             TextField(
               controller: _buttonLabelController,
-              decoration: const InputDecoration(labelText: 'نص الزر (مثال: تسوق الآن)'),
+              decoration: const InputDecoration(
+                labelText: 'نص الزر (مثال: تسوق الآن)',
+              ),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<AdminBannerActionType>(
@@ -345,14 +376,28 @@ class _AdminBannerEditDialogState extends State<_AdminBannerEditDialog> {
               decoration: const InputDecoration(labelText: 'إجراء الزر'),
               items: AdminBannerActionType.values.map((type) {
                 String label = '';
-                switch(type) {
-                  case AdminBannerActionType.none: label = 'لا شيء'; break;
-                  case AdminBannerActionType.category: label = 'تصنيف'; break;
-                  case AdminBannerActionType.brand: label = 'علامة تجارية'; break;
-                  case AdminBannerActionType.product: label = 'منتج'; break;
-                  case AdminBannerActionType.search: label = 'بحث'; break;
-                  case AdminBannerActionType.internalRoute: label = 'رابط داخلي'; break;
-                  case AdminBannerActionType.externalUrl: label = 'رابط خارجي'; break;
+                switch (type) {
+                  case AdminBannerActionType.none:
+                    label = 'لا شيء';
+                    break;
+                  case AdminBannerActionType.category:
+                    label = 'تصنيف';
+                    break;
+                  case AdminBannerActionType.brand:
+                    label = 'علامة تجارية';
+                    break;
+                  case AdminBannerActionType.product:
+                    label = 'منتج';
+                    break;
+                  case AdminBannerActionType.search:
+                    label = 'بحث';
+                    break;
+                  case AdminBannerActionType.internalRoute:
+                    label = 'رابط داخلي';
+                    break;
+                  case AdminBannerActionType.externalUrl:
+                    label = 'رابط خارجي';
+                    break;
                 }
                 return DropdownMenuItem(value: type, child: Text(label));
               }).toList(),
@@ -384,10 +429,7 @@ class _AdminBannerEditDialogState extends State<_AdminBannerEditDialog> {
                   child: const Text('إلغاء'),
                 ),
                 const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _save,
-                  child: const Text('حفظ'),
-                ),
+                FilledButton(onPressed: _save, child: const Text('حفظ')),
               ],
             ),
           ],

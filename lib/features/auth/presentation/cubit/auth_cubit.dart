@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:lpco_llc/core/network/api_contract.dart';
 import 'package:lpco_llc/core/security/app_lock_manager.dart';
@@ -72,6 +74,7 @@ class AuthCubit extends Cubit<AuthState> {
   final AppLockManager _appLockManager;
 
   DateTime? _backgroundedAt;
+  StreamSubscription<SessionExpiredEvent>? _sessionExpiredSubscription;
 
   AuthCubit({
     AuthRepository? authRepository,
@@ -81,6 +84,10 @@ class AuthCubit extends Cubit<AuthState> {
        _sessionManager = sessionManager ?? SessionManager(),
        _appLockManager = appLockManager ?? AppLockManager(),
        super(const AuthInitial()) {
+    _sessionExpiredSubscription = _sessionManager.expiredEvents.listen((_) {
+      _backgroundedAt = null;
+      _emitSafe(const Unauthenticated());
+    });
     Future.microtask(checkAuthStatus);
   }
 
@@ -440,4 +447,10 @@ class AuthCubit extends Cubit<AuthState> {
 
   bool get isLoggedIn => state is Authenticated;
   bool get isGuest => state is GuestAuthenticated;
+
+  @override
+  Future<void> close() async {
+    await _sessionExpiredSubscription?.cancel();
+    await super.close();
+  }
 }

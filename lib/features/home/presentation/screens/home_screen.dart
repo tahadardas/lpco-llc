@@ -26,6 +26,7 @@ import 'package:lpco_llc/features/cart/presentation/widgets/cart_currency_confli
 import 'package:lpco_llc/features/notifications/presentation/cubit/notifications_badge_cubit.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
+import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/utils/product_share_link.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/product_card.dart';
@@ -168,8 +169,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openCategoryListing(int categoryId, String title) {
-    context.push(AppRoutePaths.categoryUrl(categoryId));
+  void _openCategoryListing(CategoryModel category) {
+    if (category.count <= 0) {
+      context.go(AppRoutePaths.categories);
+      return;
+    }
+    context.push(AppRoutePaths.categoryUrl(category.id));
   }
 
   void _openBrandListing(String brandSlug, String title) {
@@ -798,7 +803,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return SizedBox(
             width: 86,
             child: TapScale(
-              onTap: () => _openCategoryListing(category.id, category.name),
+              onTap: () => _openCategoryListing(category),
               child: Column(
                 children: [
                   Container(
@@ -851,12 +856,21 @@ class _HomeScreenState extends State<HomeScreen> {
   List<CategoryModel> _mainCategoriesForHome(List<CategoryModel> categories) {
     return categories
         .where((category) => category.parentId <= 0)
+        .where(
+          (category) => CatalogVisibilityPolicy.isVisibleParentCategory(
+            category,
+            CatalogVisibilityPolicy.visibleCategoryChildren(
+              category,
+              categories,
+            ),
+          ),
+        )
         .toList(growable: false);
   }
 
   Widget _quickBrands(ProductState state) {
     final brands = state.brands
-        .where((brand) => brand.name.isNotEmpty)
+        .where(CatalogVisibilityPolicy.isVisibleBrand)
         .take(10)
         .toList(growable: false);
     if (brands.isEmpty) {

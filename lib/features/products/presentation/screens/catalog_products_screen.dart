@@ -13,8 +13,10 @@ import 'package:lpco_llc/features/cart/data/models/cart_item_model.dart';
 import 'package:lpco_llc/features/cart/presentation/cubit/cart_cubit.dart';
 import 'package:lpco_llc/features/cart/presentation/widgets/cart_currency_conflict_dialog.dart';
 import 'package:lpco_llc/features/products/data/models/brand_model.dart';
+import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
+import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart';
 import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/search_filter_cubit.dart';
@@ -414,12 +416,17 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
 
   Widget _idleDiscovery(SearchFilterState state) {
     final trendingTerms = _buildTrendingTerms(state);
-    final categories = state.categories.take(8).toList(growable: false);
+    final categories = state.categories
+        .where(
+          (category) => _isVisibleDiscoveryCategory(category, state.categories),
+        )
+        .take(8)
+        .toList(growable: false);
     final brands = context
         .read<ProductCubit>()
         .state
         .brands
-        .where((brand) => brand.name.trim().isNotEmpty)
+        .where(CatalogVisibilityPolicy.isVisibleBrand)
         .take(8)
         .toList(growable: false);
 
@@ -543,12 +550,16 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
       if (values.length >= 10) return values;
     }
 
-    for (final category in state.categories) {
+    for (final category in state.categories.where(
+      (category) => _isVisibleDiscoveryCategory(category, state.categories),
+    )) {
       add(category.name);
       if (values.length >= 10) return values;
     }
 
-    for (final brand in context.read<ProductCubit>().state.brands) {
+    for (final brand in context.read<ProductCubit>().state.brands.where(
+      CatalogVisibilityPolicy.isVisibleBrand,
+    )) {
       add(brand.name);
       if (values.length >= 10) return values;
     }
@@ -712,6 +723,9 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
 
     if (!_isBrandListing) {
       for (final category in state.categories) {
+        if (!_isVisibleDiscoveryCategory(category, state.categories)) {
+          continue;
+        }
         final name = category.name.trim();
         if (name.toLowerCase().contains(query)) {
           add(
@@ -731,6 +745,9 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
 
     final brands = context.read<ProductCubit>().state.brands;
     for (final brand in brands) {
+      if (!CatalogVisibilityPolicy.isVisibleBrand(brand)) {
+        continue;
+      }
       final name = brand.name.trim();
       if (name.toLowerCase().contains(query)) {
         add(
@@ -761,6 +778,20 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
     }
 
     return suggestions;
+  }
+
+  bool _isVisibleDiscoveryCategory(
+    CategoryModel category,
+    List<CategoryModel> allCategories,
+  ) {
+    if (category.parentId > 0) {
+      return CatalogVisibilityPolicy.isVisibleLeafCategory(category);
+    }
+
+    return CatalogVisibilityPolicy.isVisibleParentCategory(
+      category,
+      CatalogVisibilityPolicy.visibleCategoryChildren(category, allCategories),
+    );
   }
 
   Future<void> _applySuggestion(CatalogSuggestionItem suggestion) async {
