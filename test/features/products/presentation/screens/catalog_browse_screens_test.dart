@@ -119,6 +119,20 @@ class _BrowseBrandsRepository extends ProductRepository {
         count: 4,
         imageUrl: '',
       ),
+      CategoryModel(
+        id: 11,
+        name: 'Loaded brand pens',
+        slug: 'loaded-brand-pens',
+        count: 3,
+        imageUrl: '',
+      ),
+      CategoryModel(
+        id: 12,
+        name: 'Loaded brand empty',
+        slug: 'loaded-brand-empty',
+        count: 0,
+        imageUrl: '',
+      ),
     ];
   }
 
@@ -218,5 +232,15 @@ void main() {
 
     expect(repository.brandsRequested, isTrue);
     expect(find.text('Loaded brand'), findsWidgets);
+
+    await tester.tap(
+      find.byKey(
+        const ValueKey<String>('brand_quick_categories_expand_loaded-brand'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Loaded brand pens'), findsOneWidget);
+    expect(find.textContaining('Loaded brand empty'), findsNothing);
   });
 }

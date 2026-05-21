@@ -14,8 +14,7 @@ class BrandCategoryLinker {
     }
 
     final brandSlug = normalizeSlug(brand.slug);
-    final brandName = normalizeText(brand.name);
-    if (brandSlug.isEmpty && brandName.isEmpty) {
+    if (brandSlug.isEmpty) {
       return const <CategoryModel>[];
     }
 
@@ -36,14 +35,6 @@ class BrandCategoryLinker {
       categoriesById: categoriesById,
       categoriesBySlug: categoriesBySlug,
     );
-    if (explicit.isNotEmpty) {
-      return _sortLinkedCategories(
-        explicit,
-        brandSlug: brandSlug,
-        rootCategoryIds: _rootCategoryIds(categories, brandSlug),
-      );
-    }
-
     final linkedById = <int, CategoryModel>{};
     void include(CategoryModel category) {
       if (category.id > 0) {
@@ -52,16 +43,12 @@ class BrandCategoryLinker {
     }
 
     final rootCategoryIds = _rootCategoryIds(categories, brandSlug);
+    for (final category in explicit) {
+      include(category);
+    }
+
     for (final category in categories) {
       final categorySlug = normalizeSlug(category.slug);
-      if (categorySlug.isNotEmpty && categorySlug == brandSlug) {
-        include(category);
-        continue;
-      }
-      if (rootCategoryIds.contains(category.parentId)) {
-        include(category);
-        continue;
-      }
       if (_slugHasBrandToken(
         categorySlug: categorySlug,
         brandSlug: brandSlug,
@@ -69,11 +56,8 @@ class BrandCategoryLinker {
         include(category);
         continue;
       }
-      if (_nameMatchesBrand(
-        categoryName: category.name,
-        brandName: brand.name,
-        brandSlug: brand.slug,
-      )) {
+
+      if (rootCategoryIds.contains(category.parentId)) {
         include(category);
       }
     }
@@ -87,7 +71,11 @@ class BrandCategoryLinker {
     }
 
     return _sortLinkedCategories(
-      linkedById.values,
+      _visibleBrandCategories(
+        linkedById.values,
+        allCategories: categories,
+        rootCategoryIds: rootCategoryIds,
+      ),
       brandSlug: brandSlug,
       rootCategoryIds: rootCategoryIds,
     );
@@ -173,61 +161,27 @@ class BrandCategoryLinker {
         categorySlug.contains('-$brandSlug-');
   }
 
-  bool _nameMatchesBrand({
-    required String categoryName,
-    required String brandName,
-    required String brandSlug,
-  }) {
-    final normalizedCategoryName = normalizeText(categoryName);
-    if (normalizedCategoryName.isEmpty) {
-      return false;
-    }
+  Iterable<CategoryModel> _visibleBrandCategories(
+    Iterable<CategoryModel> categories, {
+    required List<CategoryModel> allCategories,
+    required Set<int> rootCategoryIds,
+  }) sync* {
+    final parentsWithVisibleChildren = allCategories
+        .where((category) => category.count > 0 && category.parentId > 0)
+        .map((category) => category.parentId)
+        .toSet();
 
-    final normalizedBrandName = normalizeText(brandName);
-    if (_containsTokenSequence(normalizedCategoryName, normalizedBrandName)) {
-      return true;
-    }
-
-    final normalizedBrandSlug = normalizeText(brandSlug);
-    return _containsTokenSequence(normalizedCategoryName, normalizedBrandSlug);
-  }
-
-  bool _containsTokenSequence(String haystack, String needle) {
-    if (needle.length < 2) {
-      return false;
-    }
-    final haystackTokens = haystack
-        .split(' ')
-        .where((token) => token.isNotEmpty)
-        .toList(growable: false);
-    final needleTokens = needle
-        .split(' ')
-        .where((token) => token.isNotEmpty)
-        .toList(growable: false);
-
-    if (haystackTokens.isEmpty ||
-        needleTokens.isEmpty ||
-        needleTokens.length > haystackTokens.length) {
-      return false;
-    }
-
-    for (
-      var start = 0;
-      start <= haystackTokens.length - needleTokens.length;
-      start += 1
-    ) {
-      var matches = true;
-      for (var offset = 0; offset < needleTokens.length; offset += 1) {
-        if (haystackTokens[start + offset] != needleTokens[offset]) {
-          matches = false;
-          break;
-        }
+    for (final category in categories) {
+      if (category.count > 0) {
+        yield category;
+        continue;
       }
-      if (matches) {
-        return true;
+
+      if (rootCategoryIds.contains(category.id) &&
+          parentsWithVisibleChildren.contains(category.id)) {
+        yield category;
       }
     }
-    return false;
   }
 
   List<CategoryModel> _sortLinkedCategories(
@@ -237,12 +191,20 @@ class BrandCategoryLinker {
   }) {
     final sorted = categories.toList(growable: false);
     sorted.sort((a, b) {
-      final aIsRoot =
-          rootCategoryIds.contains(a.id) || normalizeSlug(a.slug) == brandSlug;
-      final bIsRoot =
-          rootCategoryIds.contains(b.id) || normalizeSlug(b.slug) == brandSlug;
-      if (aIsRoot != bIsRoot) {
-        return aIsRoot ? -1 : 1;
+      final tierCompare =
+          _sortTier(
+            a,
+            brandSlug: brandSlug,
+            rootCategoryIds: rootCategoryIds,
+          ).compareTo(
+            _sortTier(
+              b,
+              brandSlug: brandSlug,
+              rootCategoryIds: rootCategoryIds,
+            ),
+          );
+      if (tierCompare != 0) {
+        return tierCompare;
       }
 
       final menuOrderCompare = a.menuOrder.compareTo(b.menuOrder);
@@ -260,6 +222,21 @@ class BrandCategoryLinker {
       return a.id.compareTo(b.id);
     });
     return sorted;
+  }
+
+  int _sortTier(
+    CategoryModel category, {
+    required String brandSlug,
+    required Set<int> rootCategoryIds,
+  }) {
+    if (rootCategoryIds.contains(category.id) ||
+        normalizeSlug(category.slug) == brandSlug) {
+      return 0;
+    }
+    if (rootCategoryIds.contains(category.parentId)) {
+      return 1;
+    }
+    return 2;
   }
 
   static String _safeDecode(String value) {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -195,18 +196,28 @@ class _BrandsScreenState extends State<BrandsScreen> {
                       final productDerivedCategoryIds = context
                           .read<ProductCubit>()
                           .getActiveCategoryIdsForBrand(brand.slug);
-                      final resolvedMenu = _brandCategoryResolver.resolve(
+                      final rawResolvedMenu = _brandCategoryResolver.resolve(
                         brand: brand,
                         brandSlug: brand.slug,
                         brandTitle: brand.name,
                         categories: state.categories,
                         productDerivedCategoryIds: productDerivedCategoryIds,
                       );
-                      final filteredMenu = resolvedMenu == null
+                      final fallbackAvailableCategoryIds =
+                          rawResolvedMenu?.items
+                              .where((item) => item.category.count > 0)
+                              .map((item) => item.categoryId)
+                              .toSet() ??
+                          const <int>{};
+                      final finalAvailableCategoryIds =
+                          productDerivedCategoryIds.isNotEmpty
+                          ? productDerivedCategoryIds
+                          : fallbackAvailableCategoryIds;
+                      final filteredMenu = rawResolvedMenu == null
                           ? null
                           : _brandCategoryResolver.filterByAvailableCategories(
-                              menu: resolvedMenu,
-                              availableCategoryIds: productDerivedCategoryIds,
+                              menu: rawResolvedMenu,
+                              availableCategoryIds: finalAvailableCategoryIds,
                             );
                       return BrandQuickCategoriesTile(
                         brandSlug: brand.slug,
@@ -214,9 +225,17 @@ class _BrandsScreenState extends State<BrandsScreen> {
                         subtitle: '${brand.count} منتج',
                         imageUrl: brand.imageUrl,
                         resolvedCuratedMenu: filteredMenu,
-                        onTapBrand: () => context.push(
-                          AppRoutePaths.brandUrl(normalizedBrandSlug),
-                        ),
+                        onTapBrand: () {
+                          _logBrandCategoryResolution(
+                            brandSlug: normalizedBrandSlug,
+                            rawMenu: rawResolvedMenu,
+                            productDerivedCategoryIds:
+                                productDerivedCategoryIds,
+                          );
+                          context.push(
+                            AppRoutePaths.brandUrl(normalizedBrandSlug),
+                          );
+                        },
                         onTapCategory: filteredMenu == null
                             ? null
                             : (cat) => context.push(
@@ -237,6 +256,27 @@ class _BrandsScreenState extends State<BrandsScreen> {
           );
         },
       ),
+    );
+  }
+
+  void _logBrandCategoryResolution({
+    required String brandSlug,
+    required ResolvedBrandScopedCategoryMenu? rawMenu,
+    required Set<int> productDerivedCategoryIds,
+  }) {
+    if (!kDebugMode) {
+      return;
+    }
+
+    final matchedSlugs =
+        rawMenu?.items
+            .map((item) => item.categorySlug)
+            .toList(growable: false) ??
+        const <String>[];
+    debugPrint(
+      '[BRAND_CATEGORY_LINK] brandSlug=$brandSlug '
+      'matchedCategorySlugs=$matchedSlugs '
+      'productDerivedCategoryIds=$productDerivedCategoryIds',
     );
   }
 
