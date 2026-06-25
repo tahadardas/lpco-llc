@@ -1,4 +1,6 @@
 <?php
+namespace DMS\Ecom;
+
 /**
  * Caching Module - DMS Ecom
  * إدارة الـ Cache المركزية
@@ -7,8 +9,6 @@
 if (!defined('ABSPATH')) {
     exit;
 }
-
-namespace DMS\Ecom;
 
 class CacheManager {
     private static $prefix = 'dms_';

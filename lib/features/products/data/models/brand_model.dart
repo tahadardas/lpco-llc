@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
+import 'package:lpco_llc/core/utils/image_url_normalizer.dart';
 import 'package:lpco_llc/core/utils/text_sanitizer.dart';
+import 'package:lpco_llc/features/products/data/models/category_model.dart';
 
 class BrandModel {
   final int id;
@@ -8,6 +11,7 @@ class BrandModel {
   final String imageUrl;
   final List<int> linkedCategoryIds;
   final List<String> linkedCategorySlugs;
+  final List<CategoryModel> linkedCategories;
   final int menuOrder;
   final bool showInApp;
   final bool hidden;
@@ -20,6 +24,7 @@ class BrandModel {
     required this.imageUrl,
     this.linkedCategoryIds = const <int>[],
     this.linkedCategorySlugs = const <String>[],
+    this.linkedCategories = const <CategoryModel>[],
     this.menuOrder = 0,
     this.showInApp = true,
     this.hidden = false,
@@ -27,16 +32,33 @@ class BrandModel {
 
   factory BrandModel.fromJson(Map<String, dynamic> json) {
     String resolveImage() {
-      final dynamic image = json['image'];
-      if (image is Map) {
-        return (image['src'] ?? image['url'] ?? '').toString();
+      final candidates = <dynamic>[
+        json['image'],
+        json['image_url'],
+        json['logo_url'],
+        json['thumbnail_url'],
+        json['brand_image'],
+        json['brand_logo'],
+        json['icon_url'],
+        json['icon'],
+        json['logo'],
+        json['image_src'],
+      ];
+
+      for (final candidate in candidates) {
+        final resolved = _resolveImageCandidate(candidate);
+        if (resolved.isNotEmpty) {
+          return resolved;
+        }
       }
 
-      return (json['image_url'] ??
-              json['logo_url'] ??
-              json['thumbnail_url'] ??
-              '')
-          .toString();
+      if (kDebugMode) {
+        debugPrint(
+          '[BRAND_IMAGE] missing image for brand '
+          'id=${json['id']} slug=${json['slug']} keys=${json.keys.toList()}',
+        );
+      }
+      return '';
     }
 
     return BrandModel(
@@ -48,9 +70,10 @@ class BrandModel {
       count: json['count'] is int
           ? json['count'] as int
           : int.tryParse('${json['count'] ?? '0'}') ?? 0,
-      imageUrl: resolveImage().trim(),
+      imageUrl: resolveImage(),
       linkedCategoryIds: _parseLinkedCategoryIds(json),
       linkedCategorySlugs: _parseLinkedCategorySlugs(json),
+      linkedCategories: _parseLinkedCategories(json),
       menuOrder: json['menu_order'] is int
           ? json['menu_order'] as int
           : int.tryParse('${json['menu_order'] ?? 0}') ?? 0,
@@ -63,6 +86,51 @@ class BrandModel {
                 ? !_toBool(json['show_in_app'])
                 : false),
     );
+  }
+
+  static String _resolveImageCandidate(dynamic value) {
+    if (value == null) {
+      return '';
+    }
+
+    if (value is Map) {
+      for (final key in const <String>[
+        'src',
+        'url',
+        'image_url',
+        'logo_url',
+        'thumbnail_url',
+        'brand_image',
+        'brand_logo',
+        'icon_url',
+      ]) {
+        final resolved = _resolveImageCandidate(value[key]);
+        if (resolved.isNotEmpty) {
+          return resolved;
+        }
+      }
+      return '';
+    }
+
+    if (value is List) {
+      for (final item in value) {
+        final resolved = _resolveImageCandidate(item);
+        if (resolved.isNotEmpty) {
+          return resolved;
+        }
+      }
+      return '';
+    }
+
+    final raw = TextSanitizer.fix(value).trim();
+    if (raw.isEmpty) {
+      return '';
+    }
+    if (int.tryParse(raw) != null && !raw.contains('/')) {
+      return '';
+    }
+
+    return ImageUrlNormalizer.normalize(raw).trim();
   }
 
   static bool _toBool(dynamic value) {
@@ -145,5 +213,26 @@ class BrandModel {
     read(json['app_categories']);
 
     return slugs.toList(growable: false);
+  }
+
+  static List<CategoryModel> _parseLinkedCategories(Map<String, dynamic> json) {
+    final rawCategories = json['categories'];
+    if (rawCategories is! List) {
+      return const <CategoryModel>[];
+    }
+
+    final categories = <CategoryModel>[];
+    final seen = <int>{};
+    for (final raw in rawCategories) {
+      if (raw is! Map) {
+        continue;
+      }
+      final category = CategoryModel.fromJson(Map<String, dynamic>.from(raw));
+      if (category.id <= 0 || !seen.add(category.id)) {
+        continue;
+      }
+      categories.add(category);
+    }
+    return categories;
   }
 }

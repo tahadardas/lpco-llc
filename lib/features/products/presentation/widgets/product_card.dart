@@ -17,10 +17,10 @@ export 'package:lpco_llc/features/products/presentation/widgets/product_card_uni
     show ProductCardUnit;
 
 class ProductCard extends StatefulWidget {
-  static const double loggedInGridExtent = 485;
-  static const double guestGridExtent = 450;
-  static const double loggedInFeaturedExtent = 480;
-  static const double guestFeaturedExtent = 445;
+  static const double loggedInGridExtent = 410;
+  static const double guestGridExtent = 380;
+  static const double loggedInFeaturedExtent = 405;
+  static const double guestFeaturedExtent = 375;
 
   static double preferredGridExtent({required bool isGuest}) =>
       isGuest ? guestGridExtent : loggedInGridExtent;
@@ -335,7 +335,7 @@ class _ProductCardState extends State<ProductCard> {
           children: <Widget>[
             Text(
               widget.product.name,
-              maxLines: 4,
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontWeight: FontWeight.w900,
@@ -344,7 +344,7 @@ class _ProductCardState extends State<ProductCard> {
                 color: Color(0xFF151920),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 5),
             if (_showUnitSelector) ...<Widget>[
               const Text(
                 'اختر الوحدة',
@@ -354,7 +354,7 @@ class _ProductCardState extends State<ProductCard> {
                   fontSize: 12,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               _unitsSelector(compact: true),
             ] else if (_units.isNotEmpty) ...<Widget>[
               Text(
@@ -368,10 +368,10 @@ class _ProductCardState extends State<ProductCard> {
             ],
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         // Price Section
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: 2),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -814,15 +814,16 @@ class _ProductCardState extends State<ProductCard> {
   List<String> get _imageUrls {
     final urls = <String>[];
     for (final image in widget.product.images) {
-      final src = image.src.trim();
+      final src = AppNetworkImage.normalizeUrl(image.cardSrc);
       if (src.isEmpty || urls.contains(src)) {
         continue;
       }
       urls.add(src);
     }
 
-    if (urls.isEmpty && widget.product.firstImage.trim().isNotEmpty) {
-      urls.add(widget.product.firstImage.trim());
+    final fallback = AppNetworkImage.normalizeUrl(widget.product.firstImage);
+    if (urls.isEmpty && fallback.isNotEmpty) {
+      urls.add(fallback);
     }
 
     return urls;
@@ -834,12 +835,6 @@ class _ProductCardState extends State<ProductCard> {
       return AppNetworkImage(
         imageUrl: imageUrls.isEmpty ? '' : imageUrls.first,
         fit: fit,
-        placeholder: Container(color: const Color(0xFFF4F6FA)),
-        errorWidget: Container(
-          color: const Color(0xFFF4F6FA),
-          alignment: Alignment.center,
-          child: const Icon(Icons.image_not_supported),
-        ),
       );
     }
 
@@ -855,16 +850,7 @@ class _ProductCardState extends State<ProductCard> {
         }
       },
       itemBuilder: (context, index) {
-        return AppNetworkImage(
-          imageUrl: imageUrls[index],
-          fit: fit,
-          placeholder: Container(color: const Color(0xFFF4F6FA)),
-          errorWidget: Container(
-            color: const Color(0xFFF4F6FA),
-            alignment: Alignment.center,
-            child: const Icon(Icons.image_not_supported),
-          ),
-        );
+        return AppNetworkImage(imageUrl: imageUrls[index], fit: fit);
       },
     );
   }

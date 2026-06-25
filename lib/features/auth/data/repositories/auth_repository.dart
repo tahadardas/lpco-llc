@@ -286,9 +286,7 @@ class AuthRepository {
     } on DioException catch (e) {
       final status = e.response?.statusCode ?? 0;
       if (status == 401 || status == 403) {
-        await _sessionManager.clear();
-        _productRepository.invalidateCache();
-        return null;
+        return user;
       }
       return user;
     } catch (_) {

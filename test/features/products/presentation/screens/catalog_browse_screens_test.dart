@@ -11,6 +11,7 @@ import 'package:lpco_llc/features/products/data/repositories/product_repository.
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/screens/brands_screen.dart';
 import 'package:lpco_llc/features/products/presentation/screens/categories_screen.dart';
+import 'package:lpco_llc/features/products/presentation/widgets/global_catalog_search_bar.dart';
 
 class _BrowseCategoryRepository extends ProductRepository {
   static const categories = <CategoryModel>[
@@ -73,11 +74,6 @@ class _BrowseBrandsRepository extends ProductRepository {
   @override
   Future<List<BrandModel>> getCachedBrands({bool guest = false}) async {
     return const <BrandModel>[];
-  }
-
-  @override
-  Future<HomeBannerData> getCachedHomeBannerData({bool guest = true}) async {
-    return const HomeBannerData.empty();
   }
 
   @override
@@ -149,16 +145,9 @@ class _BrowseBrandsRepository extends ProductRepository {
         slug: 'loaded-brand',
         count: 4,
         imageUrl: '',
+        linkedCategoryIds: <int>[11, 12],
       ),
     ];
-  }
-
-  @override
-  Future<HomeBannerData> getHomeBannerData({
-    bool guest = true,
-    bool forceRefresh = false,
-  }) async {
-    return const HomeBannerData.empty();
   }
 
   @override
@@ -201,6 +190,10 @@ void main() {
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
 
+    expect(
+      tester.getTopLeft(find.byType(GlobalCatalogSearchBar)).dy,
+      lessThan(180),
+    );
     expect(find.text('Parent category'), findsOneWidget);
     expect(find.text('Child category'), findsNothing);
 
@@ -231,6 +224,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.brandsRequested, isTrue);
+    expect(
+      tester.getTopLeft(find.byType(GlobalCatalogSearchBar)).dy,
+      lessThan(180),
+    );
     expect(find.text('Loaded brand'), findsWidgets);
 
     await tester.tap(

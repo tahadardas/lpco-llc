@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:go_router/go_router.dart';
 import 'package:pull_to_refresh/pull_to_refresh.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:card_swiper/card_swiper.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:lpco_llc/app/router/app_routes.dart';
 
-import 'package:lpco_llc/features/admin/data/models/admin_models.dart';
+import 'package:lpco_llc/core/navigation/app_action_handler.dart';
 import 'package:lpco_llc/features/products/data/models/home_banner_model.dart';
 import 'package:lpco_llc/core/theme/app_colors.dart';
 import 'package:lpco_llc/core/theme/app_radius.dart';
@@ -28,43 +28,13 @@ import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
+import 'package:lpco_llc/features/products/presentation/utils/product_image_preloader.dart';
 import 'package:lpco_llc/features/products/presentation/utils/product_share_link.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/product_card.dart';
+import 'package:lpco_llc/features/products/presentation/widgets/global_catalog_search_bar.dart';
 
 String? homeHeroInternalRouteForLink(String rawLink) {
-  final link = rawLink.trim();
-  final lower = link.toLowerCase();
-  if (lower.startsWith('product:')) {
-    final id = int.tryParse(lower.replaceFirst('product:', ''));
-    return id == null ? null : AppRoutePaths.productUrl(id);
-  }
-  if (lower.startsWith('category:')) {
-    final id = int.tryParse(lower.replaceFirst('category:', ''));
-    return id == null ? null : AppRoutePaths.categoryUrl(id);
-  }
-  if (lower.startsWith('brand:')) {
-    final slug = lower.replaceFirst('brand:', '').trim();
-    return slug.isEmpty ? null : AppRoutePaths.brandUrl(slug);
-  }
-  if (lower.startsWith('search:')) {
-    final term = lower.replaceFirst('search:', '').trim();
-    return term.isEmpty ? null : AppRoutePaths.searchUrl(query: term);
-  }
-
-  switch (lower) {
-    case 'catalog':
-      return AppRoutePaths.catalog;
-    case 'categories':
-      return AppRoutePaths.categories;
-    case 'brands':
-      return AppRoutePaths.brands;
-    case 'cart':
-      return AppRoutePaths.cart;
-    case 'account':
-      return AppRoutePaths.account;
-  }
-
-  return link.startsWith('/') ? link : null;
+  return AppActionHandler.internalRouteForLegacyLink(rawLink);
 }
 
 class HomeScreen extends StatefulWidget {
@@ -75,7 +45,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _searchController = TextEditingController();
   final _scrollController = ScrollController();
   final RefreshController _refreshController = RefreshController();
   bool _initialized = false;
@@ -100,7 +69,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _searchController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _refreshController.dispose();
@@ -144,6 +112,22 @@ class _HomeScreenState extends State<HomeScreen> {
         _scrollController.position.maxScrollExtent - 280) {
       context.read<ProductCubit>().loadMore();
     }
+  }
+
+  void _preloadHomeProductImages(ProductState state) {
+    ProductImagePreloader.preloadProducts(
+      context,
+      <ProductModel>[
+        ...state.bannerProducts,
+        ...state.featuredProducts,
+        ...state.latestProducts,
+        ...state.products.take(8),
+      ],
+      productLimit: 24,
+      imageLimit: 32,
+      includeGallery: true,
+      galleryImagesPerProduct: 2,
+    );
   }
 
   Future<void> _scanFromHome() async {
@@ -285,7 +269,8 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             }
 
-            final products = productState.products;
+            final products = productState.latestProducts;
+            _preloadHomeProductImages(productState);
 
             return SmartRefresher(
               controller: _refreshController,
@@ -297,6 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: CustomScrollView(
                 controller: _scrollController,
+                scrollCacheExtent: const ScrollCacheExtent.pixels(900),
                 slivers: [
                   SliverToBoxAdapter(child: _searchBar()),
                   SliverToBoxAdapter(
@@ -317,10 +303,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   SliverToBoxAdapter(
                     child: _sectionCard(
                       title: 'منتجات مميزة',
-                      child: _featuredProducts(
-                        products: products,
-                        productState: productState,
-                      ),
+                      child: _featuredProducts(productState: productState),
                     ),
                   ),
                   SliverToBoxAdapter(
@@ -458,20 +441,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _searchBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
-      child: TextField(
-        controller: _searchController,
-        readOnly: true,
-        onTap: _openSearchHub,
-        decoration: InputDecoration(
-          hintText: 'ابحث عن منتج أو SKU أو باركود...',
-          prefixIcon: const Icon(Icons.search_rounded),
-          suffixIcon: IconButton(
-            icon: const Icon(Icons.arrow_forward_rounded),
-            onPressed: _openSearchHub,
-          ),
-        ),
+    return GlobalCatalogSearchBar(
+      onSearch: (query) => context.push(
+        query.isEmpty
+            ? AppRoutePaths.catalogSearchEntry(basePath: AppRoutePaths.home)
+            : AppRoutePaths.searchUrl(query: query),
       ),
     );
   }
@@ -519,7 +493,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           opacity: 1.0,
                           child: AppNetworkImage(
                             imageUrl: slide.imageUrl,
-                            fit: BoxFit.contain,
+                            fit: slide.imageFit,
                             placeholder: Container(color: Colors.transparent),
                             errorWidget: const SizedBox.shrink(),
                           ),
@@ -529,10 +503,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
-                              begin: Alignment.centerRight,
-                              end: Alignment.centerLeft,
+                              begin: slide.overlayBegin,
+                              end: slide.overlayEnd,
                               colors: <Color>[
-                                Colors.black.withValues(alpha: 0.6),
+                                Colors.black.withValues(
+                                  alpha: slide.overlayOpacity,
+                                ),
                                 Colors.transparent,
                               ],
                             ),
@@ -542,16 +518,17 @@ class _HomeScreenState extends State<HomeScreen> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: slide.crossAxisAlignment,
+                          mainAxisAlignment: slide.mainAxisAlignment,
                           children: <Widget>[
                             if (slide.title.trim().isNotEmpty)
                               Text(
                                 TextSanitizer.fix(slide.title),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                textAlign: slide.textAlign,
+                                style: TextStyle(
+                                  color: slide.titleColor,
                                   fontSize: 22,
                                   fontWeight: FontWeight.w900,
                                   height: 1.1,
@@ -563,8 +540,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 TextSanitizer.fix(slide.subtitle),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
+                                textAlign: slide.textAlign,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.9),
+                                  color: slide.subtitleColor,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -577,8 +555,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 child: FilledButton.tonal(
                                   onPressed: slide.onTap,
                                   style: FilledButton.styleFrom(
-                                    backgroundColor: AppColors.primaryRed,
-                                    foregroundColor: Colors.white,
+                                    backgroundColor:
+                                        slide.buttonBackgroundColor,
+                                    foregroundColor: slide.buttonTextColor,
                                     textStyle: const TextStyle(
                                       fontWeight: FontWeight.w800,
                                       fontSize: 12,
@@ -633,13 +612,22 @@ class _HomeScreenState extends State<HomeScreen> {
       slides.add(
         _HeroSlideData(
           imageUrl: banner.imageUrl,
-          title: banner.title.isNotEmpty ? banner.title : 'عروض المتجر الكبرى',
-          subtitle: banner.subtitle.isNotEmpty
-              ? banner.subtitle
-              : 'تحديثات يومية للمنتجات والعروض',
-          ctaLabel: banner.buttonLabel.isNotEmpty
-              ? banner.buttonLabel
-              : 'تسوق الآن',
+          title: banner.showTitle ? banner.title : '',
+          subtitle: banner.showSubtitle ? banner.subtitle : '',
+          ctaLabel: banner.showButton ? banner.buttonLabel : '',
+          contentAlignment: banner.contentAlignment,
+          contentVerticalAlignment: banner.contentVerticalAlignment,
+          imageFit: banner.imageFit == 'contain'
+              ? BoxFit.contain
+              : BoxFit.cover,
+          overlayOpacity: banner.overlayOpacity / 100,
+          titleColor: _bannerColor(banner.titleColor, Colors.white),
+          subtitleColor: _bannerColor(banner.subtitleColor, Colors.white),
+          buttonBackgroundColor: _bannerColor(
+            banner.buttonBackgroundColor,
+            AppColors.primaryRed,
+          ),
+          buttonTextColor: _bannerColor(banner.buttonTextColor, Colors.white),
           onTap: () => _resolveBannerAction(banner),
         ),
       );
@@ -673,29 +661,23 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // 2. Banner Products (Dynamic/Manual)
-    if (slides.isEmpty) {
-      final List<ProductModel> productsToShow = state.bannerProducts.isNotEmpty
-          ? state.bannerProducts
-          : state.products.where((product) => product.inStock).take(4).toList();
-
-      for (final product in productsToShow) {
-        final categoryName = product.categories.isNotEmpty
-            ? product.categories.first.name
-            : 'منتج مميز';
-        slides.add(
-          _HeroSlideData(
-            imageUrl: product.firstImage,
-            title: product.name,
-            subtitle: categoryName,
-            ctaLabel: 'عرض المنتج',
-            onTap: () => context.push(
-              AppRoutePaths.productUrl(product.id),
-              extra: product,
-            ),
+    // Product slider selections are server-owned and retain the admin order.
+    for (final product in state.bannerProducts) {
+      final categoryName = product.categories.isNotEmpty
+          ? product.categories.first.name
+          : 'منتج مميز';
+      slides.add(
+        _HeroSlideData(
+          imageUrl: product.firstImage,
+          title: product.name,
+          subtitle: categoryName,
+          ctaLabel: 'عرض المنتج',
+          onTap: () => context.push(
+            AppRoutePaths.productUrl(product.id),
+            extra: product,
           ),
-        );
-      }
+        ),
+      );
     }
 
     if (slides.isEmpty) {
@@ -714,49 +696,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _resolveBannerAction(HomeBannerSlideData banner) async {
-    final actionType = banner.actionType;
-    final actionValue = banner.actionValue.trim();
+    await AppActionHandler.handle(
+      context,
+      actionType: banner.actionType.name,
+      actionValue: banner.actionValue,
+      fallbackLink: banner.buttonLink,
+    );
+  }
 
-    if (actionType != AdminBannerActionType.none && actionValue.isNotEmpty) {
-      switch (actionType) {
-        case AdminBannerActionType.category:
-          final id = int.tryParse(actionValue);
-          if (id != null) {
-            context.push(AppRoutePaths.categoryUrl(id));
-            return;
-          }
-          break;
-        case AdminBannerActionType.brand:
-          context.push(AppRoutePaths.brandUrl(actionValue));
-          return;
-        case AdminBannerActionType.product:
-          final id = int.tryParse(actionValue);
-          if (id != null) {
-            context.push(AppRoutePaths.productUrl(id));
-            return;
-          }
-          break;
-        case AdminBannerActionType.search:
-          context.push(AppRoutePaths.searchUrl(query: actionValue));
-          return;
-        case AdminBannerActionType.internalRoute:
-          context.push(
-            actionValue.startsWith('/') ? actionValue : '/$actionValue',
-          );
-          return;
-        case AdminBannerActionType.externalUrl:
-          final uri = Uri.tryParse(actionValue);
-          if (uri != null && uri.scheme.toLowerCase() == 'https') {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
-          return;
-        case AdminBannerActionType.none:
-          break;
-      }
-    }
-
-    // Fallback to old buttonLink parsing
-    await _openHeroLink(banner.buttonLink);
+  Color _bannerColor(String raw, Color fallback) {
+    final normalized = raw.trim().replaceFirst('#', '');
+    final hex = normalized.length == 6 ? 'FF$normalized' : normalized;
+    if (hex.length != 8) return fallback;
+    final value = int.tryParse(hex, radix: 16);
+    return value == null ? fallback : Color(value);
   }
 
   Future<void> _openHeroLink(String rawLink) async {
@@ -766,23 +719,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final internalRoute = homeHeroInternalRouteForLink(link);
-    if (internalRoute != null) {
-      context.push(internalRoute);
-      return;
-    }
-
-    final lower = link.toLowerCase();
-
-    if (lower.startsWith('http://') || lower.startsWith('https://')) {
-      final uri = Uri.tryParse(link);
-      if (uri != null) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-      return;
-    }
-
-    _openSearchHub();
+    final handled = await AppActionHandler.openLegacyLink(context, link);
+    if (!handled) _openSearchHub();
   }
 
   Widget _quickCategories(ProductState state) {
@@ -795,6 +733,7 @@ class _HomeScreenState extends State<HomeScreen> {
       height: 132,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        scrollCacheExtent: const ScrollCacheExtent.pixels(520),
         physics: const BouncingScrollPhysics(),
         itemCount: categories.length,
         separatorBuilder: (context, index) => const SizedBox(width: 10),
@@ -881,6 +820,7 @@ class _HomeScreenState extends State<HomeScreen> {
       height: 46,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        scrollCacheExtent: const ScrollCacheExtent.pixels(420),
         itemCount: brands.length,
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
@@ -899,22 +839,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _featuredProducts({
-    required List<ProductModel> products,
-    required ProductState productState,
-  }) {
-    final inStockProducts = products
+  Widget _featuredProducts({required ProductState productState}) {
+    final inStockProducts = productState.featuredProducts
         .where((product) => product.inStock)
         .toList(growable: false);
-    final featured = inStockProducts
-        .where((product) => product.isFeatured)
-        .take(8)
-        .toList(growable: false);
-    final featuredProducts = featured.isNotEmpty
-        ? featured
-        : (inStockProducts.length > 8
-              ? inStockProducts.reversed.take(8).toList(growable: false)
-              : inStockProducts.take(8).toList(growable: false));
+    final featuredProducts = inStockProducts.take(8).toList(growable: false);
 
     if (featuredProducts.isEmpty) {
       if (!productState.initialSyncDone) {
@@ -938,6 +867,7 @@ class _HomeScreenState extends State<HomeScreen> {
       height: ProductCard.preferredFeaturedExtent(isGuest: _isGuest),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        scrollCacheExtent: const ScrollCacheExtent.pixels(760),
         itemCount: featuredProducts.length,
         separatorBuilder: (_, _) => const SizedBox(width: 10),
         itemBuilder: (context, index) {
@@ -1115,6 +1045,14 @@ class _HeroSlideData {
   final String subtitle;
   final String ctaLabel;
   final VoidCallback onTap;
+  final String contentAlignment;
+  final String contentVerticalAlignment;
+  final BoxFit imageFit;
+  final double overlayOpacity;
+  final Color titleColor;
+  final Color subtitleColor;
+  final Color buttonBackgroundColor;
+  final Color buttonTextColor;
 
   const _HeroSlideData({
     required this.imageUrl,
@@ -1122,5 +1060,53 @@ class _HeroSlideData {
     required this.subtitle,
     required this.ctaLabel,
     required this.onTap,
+    this.contentAlignment = 'start',
+    this.contentVerticalAlignment = 'center',
+    this.imageFit = BoxFit.cover,
+    this.overlayOpacity = 0.6,
+    this.titleColor = Colors.white,
+    this.subtitleColor = Colors.white,
+    this.buttonBackgroundColor = AppColors.primaryRed,
+    this.buttonTextColor = Colors.white,
   });
+
+  CrossAxisAlignment get crossAxisAlignment {
+    return switch (contentAlignment) {
+      'center' => CrossAxisAlignment.center,
+      'end' => CrossAxisAlignment.end,
+      _ => CrossAxisAlignment.start,
+    };
+  }
+
+  TextAlign get textAlign {
+    return switch (contentAlignment) {
+      'center' => TextAlign.center,
+      'end' => TextAlign.end,
+      _ => TextAlign.start,
+    };
+  }
+
+  MainAxisAlignment get mainAxisAlignment {
+    return switch (contentVerticalAlignment) {
+      'top' => MainAxisAlignment.start,
+      'bottom' => MainAxisAlignment.end,
+      _ => MainAxisAlignment.center,
+    };
+  }
+
+  Alignment get overlayBegin {
+    return switch (contentAlignment) {
+      'center' => Alignment.center,
+      'end' => Alignment.centerLeft,
+      _ => Alignment.centerRight,
+    };
+  }
+
+  Alignment get overlayEnd {
+    return switch (contentAlignment) {
+      'center' => Alignment.centerLeft,
+      'end' => Alignment.centerRight,
+      _ => Alignment.centerLeft,
+    };
+  }
 }

@@ -36,30 +36,24 @@ class BrandCategoryLinker {
       categoriesById: categoriesById,
       categoriesBySlug: categoriesBySlug,
     );
+    final rootCategoryIds = _rootCategoryIds(categories, brandSlug);
+    if (explicit.isNotEmpty) {
+      return _sortLinkedCategories(
+        _visibleBrandCategories(
+          explicit,
+          allCategories: categories,
+          rootCategoryIds: rootCategoryIds,
+          brandSlug: brandSlug,
+        ),
+        brandSlug: brandSlug,
+        rootCategoryIds: rootCategoryIds,
+      );
+    }
+
     final linkedById = <int, CategoryModel>{};
     void include(CategoryModel category) {
       if (category.id > 0) {
         linkedById[category.id] = category;
-      }
-    }
-
-    final rootCategoryIds = _rootCategoryIds(categories, brandSlug);
-    for (final category in explicit) {
-      include(category);
-    }
-
-    for (final category in categories) {
-      final categorySlug = normalizeSlug(category.slug);
-      if (_slugHasBrandToken(
-        categorySlug: categorySlug,
-        brandSlug: brandSlug,
-      )) {
-        include(category);
-        continue;
-      }
-
-      if (rootCategoryIds.contains(category.parentId)) {
-        include(category);
       }
     }
 
@@ -124,6 +118,12 @@ class BrandCategoryLinker {
   }) sync* {
     final seen = <int>{};
 
+    for (final category in brand.linkedCategories) {
+      if (category.id > 0 && seen.add(category.id)) {
+        yield category;
+      }
+    }
+
     for (final id in brand.linkedCategoryIds) {
       final category = categoriesById[id];
       if (category != null && seen.add(category.id)) {
@@ -148,29 +148,6 @@ class BrandCategoryLinker {
         .map((category) => category.id)
         .where((id) => id > 0)
         .toSet();
-  }
-
-  bool _slugHasBrandToken({
-    required String categorySlug,
-    required String brandSlug,
-  }) {
-    if (categorySlug.isEmpty || brandSlug.isEmpty) {
-      return false;
-    }
-    if (categorySlug == brandSlug ||
-        categorySlug.startsWith('$brandSlug-') ||
-        categorySlug.endsWith('-$brandSlug') ||
-        categorySlug.contains('-$brandSlug-')) {
-      return true;
-    }
-
-    if (brandSlug.length >= 4 &&
-        categorySlug.startsWith(brandSlug) &&
-        categorySlug.length > brandSlug.length) {
-      return true;
-    }
-
-    return false;
   }
 
   Iterable<CategoryModel> _visibleBrandCategories(

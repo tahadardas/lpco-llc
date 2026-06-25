@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -16,6 +17,7 @@ import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_search_query.dart';
+import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart';
 import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
@@ -26,6 +28,7 @@ import 'package:lpco_llc/features/products/presentation/widgets/catalog_results_
 import 'package:lpco_llc/features/products/presentation/widgets/catalog_search_bar.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/catalog_suggestions_panel.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/brand_scoped_category_menu.dart';
+import 'package:lpco_llc/features/products/presentation/utils/product_image_preloader.dart';
 import 'package:lpco_llc/features/products/presentation/utils/product_share_link.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/product_card.dart';
 
@@ -63,7 +66,10 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   late final SearchFilterCubit _searchFilterCubit;
+  final ProductRepository _productRepository = ProductRepository();
   String _basePath = AppRoutePaths.catalog;
+  List<CategoryModel> _brandEndpointCategories = const <CategoryModel>[];
+  String _loadedBrandCategorySlug = '';
 
   bool get _isGuest => context.read<AuthCubit>().state is! Authenticated;
   bool get _isCategoryListing =>
@@ -133,6 +139,7 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
     });
 
     _initializeSearch();
+    _loadBrandCategories();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final shouldFocus =
@@ -145,6 +152,16 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
         }
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant CatalogProductsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.brandSlug != widget.brandSlug) {
+      _brandEndpointCategories = const <CategoryModel>[];
+      _loadedBrandCategorySlug = '';
+      _loadBrandCategories();
+    }
   }
 
   @override
@@ -201,6 +218,26 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
       initialPerPage: _isBrandListing ? 20 : null,
       requireExplicitSearch: widget.requireExplicitSearch,
     );
+  }
+
+  Future<void> _loadBrandCategories() async {
+    final brandSlug = widget.brandSlug?.trim() ?? '';
+    if (brandSlug.isEmpty || _loadedBrandCategorySlug == brandSlug) {
+      return;
+    }
+    _loadedBrandCategorySlug = brandSlug;
+    try {
+      final categories = await _productRepository.getBrandCategories(
+        brandSlug: brandSlug,
+        guest: _isGuest,
+        forceRefresh: true,
+      );
+      if (!mounted || _loadedBrandCategorySlug != brandSlug) return;
+      setState(() => _brandEndpointCategories = categories);
+    } catch (_) {
+      if (!mounted || _loadedBrandCategorySlug != brandSlug) return;
+      setState(() => _brandEndpointCategories = const <CategoryModel>[]);
+    }
   }
 
   void _onSearchFocusChanged() {
@@ -616,23 +653,48 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
     final productDerivedCategoryIds = context
         .read<ProductCubit>()
         .getActiveCategoryIdsForBrand(brandSlug);
+    final menuCategories = _brandEndpointCategories.isNotEmpty
+        ? _brandEndpointCategories
+        : state.categories;
 
     return BrandScopedCategoryMenu(
       brand: brand,
       brandSlug: widget.brandSlug,
       brandTitle: widget.title,
-      categories: state.categories,
+      categories: menuCategories,
+      hasAuthoritativeCategories: _brandEndpointCategories.isNotEmpty,
       productDerivedCategoryIds: productDerivedCategoryIds,
       selectedCategoryIds: _searchFilterCubit.activeCuratedCategoryId != null
           ? <int>{_searchFilterCubit.activeCuratedCategoryId!}
           : const <int>{},
-      onSelectCategory: (item) => _searchFilterCubit.applyCuratedCategory(
-        item.categoryId,
-        categorySlug: item.categorySlug,
-        labelAr: item.labelAr,
-      ),
-      onClearCategory: () => _searchFilterCubit.applyCuratedCategory(null),
+      onSelectCategory: _selectBrandCategory,
+      onClearCategory: _clearBrandCategory,
     );
+  }
+
+  Future<void> _selectBrandCategory(
+    ResolvedBrandScopedCategoryItem item,
+  ) async {
+    await _searchFilterCubit.applyCuratedCategory(
+      item.categoryId,
+      categorySlug: item.categorySlug,
+      labelAr: item.labelAr,
+    );
+    _scrollProductsToStart();
+  }
+
+  Future<void> _clearBrandCategory() async {
+    await _searchFilterCubit.applyCuratedCategory(null);
+    _scrollProductsToStart();
+  }
+
+  void _scrollProductsToStart() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) {
+        return;
+      }
+      _scrollController.jumpTo(0);
+    });
   }
 
   BrandModel? _findCurrentBrand(List<BrandModel> brands, String brandSlug) {
@@ -870,6 +932,12 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
 
     final savedIds = context.watch<ProductCubit>().state.savedProductIds;
     final showSkeleton = state.status == SearchFilterStatus.loading;
+    ProductImagePreloader.preloadProducts(
+      context,
+      state.products,
+      productLimit: 14,
+      imageLimit: 18,
+    );
 
     return Stack(
       children: [
@@ -877,6 +945,7 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
           onRefresh: () => _searchFilterCubit.refresh(forceRemote: true),
           child: CustomScrollView(
             controller: _scrollController,
+            scrollCacheExtent: const ScrollCacheExtent.pixels(900),
             slivers: [
               _productsGrid(state: state, savedIds: savedIds),
               if (state.status == SearchFilterStatus.loadingMore)
@@ -903,6 +972,7 @@ class _CatalogProductsScreenState extends State<CatalogProductsScreen> {
         14,
         _bottomSafeInset(context, extra: 12),
       ),
+      scrollCacheExtent: const ScrollCacheExtent.pixels(900),
       itemCount: 6,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,

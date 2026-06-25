@@ -2,6 +2,28 @@ import 'package:lpco_llc/core/utils/text_sanitizer.dart';
 
 double _toDouble(dynamic value) => double.tryParse('$value') ?? 0;
 int _toInt(dynamic value) => int.tryParse('$value') ?? 0;
+List<dynamic> _asList(dynamic value) {
+  if (value is List) return value;
+  if (value is String && value.trim().isNotEmpty) {
+    return value
+        .split(',')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+  return const <dynamic>[];
+}
+
+Map<String, dynamic> _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return const <String, dynamic>{};
+}
+
+List<int> _parseAdminIdList(dynamic value) {
+  return _asList(value).map(_toInt).where((id) => id > 0).toList();
+}
+
 bool _toBool(dynamic value) {
   if (value is bool) return value;
   final normalized = TextSanitizer.fix(value).toLowerCase();
@@ -65,6 +87,7 @@ class AdminTermModel {
   final String name;
   final String slug;
   final String imageUrl;
+  final int menuOrder;
   final bool showInApp;
   final bool hidden;
 
@@ -73,6 +96,7 @@ class AdminTermModel {
     required this.name,
     required this.slug,
     required this.imageUrl,
+    this.menuOrder = 0,
     this.showInApp = true,
     this.hidden = false,
   });
@@ -83,6 +107,7 @@ class AdminTermModel {
       name: TextSanitizer.fix(json['name']),
       slug: TextSanitizer.fix(json['slug']),
       imageUrl: TextSanitizer.fix(json['image_url']),
+      menuOrder: _toInt(json['menu_order']),
       showInApp: json.containsKey('show_in_app')
           ? _toBool(json['show_in_app'])
           : (json.containsKey('hidden') ? !_toBool(json['hidden']) : true),
@@ -544,6 +569,7 @@ class AdminHomeBannerItemModel {
   final String title;
   final String subtitle;
   final String buttonLabel;
+  final String buttonLink;
   final AdminBannerActionType actionType;
   final String actionValue;
   final int sortOrder;
@@ -551,6 +577,17 @@ class AdminHomeBannerItemModel {
   final String? endsAt;
   final List<int> productIds;
   final String updatedAt;
+  final bool showTitle;
+  final bool showSubtitle;
+  final bool showButton;
+  final String contentAlignment;
+  final String contentVerticalAlignment;
+  final String imageFit;
+  final int overlayOpacity;
+  final String titleColor;
+  final String subtitleColor;
+  final String buttonBackgroundColor;
+  final String buttonTextColor;
 
   const AdminHomeBannerItemModel({
     required this.id,
@@ -560,6 +597,7 @@ class AdminHomeBannerItemModel {
     required this.title,
     required this.subtitle,
     required this.buttonLabel,
+    required this.buttonLink,
     required this.actionType,
     required this.actionValue,
     required this.sortOrder,
@@ -567,6 +605,17 @@ class AdminHomeBannerItemModel {
     this.endsAt,
     required this.productIds,
     required this.updatedAt,
+    this.showTitle = true,
+    this.showSubtitle = true,
+    this.showButton = true,
+    this.contentAlignment = 'start',
+    this.contentVerticalAlignment = 'center',
+    this.imageFit = 'cover',
+    this.overlayOpacity = 60,
+    this.titleColor = '#FFFFFF',
+    this.subtitleColor = '#FFFFFF',
+    this.buttonBackgroundColor = '#D31225',
+    this.buttonTextColor = '#FFFFFF',
   });
 
   factory AdminHomeBannerItemModel.fromJson(Map<String, dynamic> json) {
@@ -600,6 +649,7 @@ class AdminHomeBannerItemModel {
       title: TextSanitizer.fix(json['title']),
       subtitle: TextSanitizer.fix(json['subtitle']),
       buttonLabel: TextSanitizer.fix(json['button_label']),
+      buttonLink: TextSanitizer.fix(json['button_link']),
       actionType: parseAction(json['action_type'] ?? ''),
       actionValue: TextSanitizer.fix(json['action_value']),
       sortOrder: _toInt(json['sort_order']),
@@ -614,6 +664,29 @@ class AdminHomeBannerItemModel {
           .where((id) => id > 0)
           .toList(),
       updatedAt: TextSanitizer.fix(json['updated_at']),
+      showTitle: json.containsKey('show_title')
+          ? _toBool(json['show_title'])
+          : true,
+      showSubtitle: json.containsKey('show_subtitle')
+          ? _toBool(json['show_subtitle'])
+          : true,
+      showButton: json.containsKey('show_button')
+          ? _toBool(json['show_button'])
+          : true,
+      contentAlignment: TextSanitizer.fix(json['content_alignment'] ?? 'start'),
+      contentVerticalAlignment: TextSanitizer.fix(
+        json['content_vertical_alignment'] ?? 'center',
+      ),
+      imageFit: TextSanitizer.fix(json['image_fit'] ?? 'cover'),
+      overlayOpacity: _toInt(json['overlay_opacity'] ?? 60).clamp(0, 100),
+      titleColor: TextSanitizer.fix(json['title_color'] ?? '#FFFFFF'),
+      subtitleColor: TextSanitizer.fix(json['subtitle_color'] ?? '#FFFFFF'),
+      buttonBackgroundColor: TextSanitizer.fix(
+        json['button_background_color'] ?? '#D31225',
+      ),
+      buttonTextColor: TextSanitizer.fix(
+        json['button_text_color'] ?? '#FFFFFF',
+      ),
     );
   }
 
@@ -645,6 +718,7 @@ class AdminHomeBannerItemModel {
       'title': title,
       'subtitle': subtitle,
       'button_label': buttonLabel,
+      'button_link': buttonLink,
       'action_type': actionString(),
       'action_value': actionValue,
       'sort_order': sortOrder,
@@ -652,6 +726,17 @@ class AdminHomeBannerItemModel {
       if (endsAt != null) 'ends_at': endsAt,
       'product_ids': productIds,
       'updated_at': updatedAt,
+      'show_title': showTitle,
+      'show_subtitle': showSubtitle,
+      'show_button': showButton,
+      'content_alignment': contentAlignment,
+      'content_vertical_alignment': contentVerticalAlignment,
+      'image_fit': imageFit,
+      'overlay_opacity': overlayOpacity,
+      'title_color': titleColor,
+      'subtitle_color': subtitleColor,
+      'button_background_color': buttonBackgroundColor,
+      'button_text_color': buttonTextColor,
     };
   }
 }
@@ -800,6 +885,9 @@ class AdminOrderingConfigModel {
   final List<int> hiddenCategories;
   final List<int> hiddenBrands;
   final List<int> featuredProducts;
+  final List<int> sliderProducts;
+  final List<int> latestProducts;
+  final String latestMode;
   final String updatedAt;
   final List<AdminTermModel> availableCategories;
   final List<AdminTermModel> availableBrands;
@@ -811,6 +899,9 @@ class AdminOrderingConfigModel {
     required this.hiddenCategories,
     required this.hiddenBrands,
     required this.featuredProducts,
+    required this.sliderProducts,
+    required this.latestProducts,
+    required this.latestMode,
     required this.updatedAt,
     required this.availableCategories,
     required this.availableBrands,
@@ -847,6 +938,21 @@ class AdminOrderingConfigModel {
               .map(_toInt)
               .where((id) => id > 0)
               .toList(),
+      sliderProducts:
+          ((config['slider_products'] as List?) ?? const <dynamic>[])
+              .map(_toInt)
+              .where((id) => id > 0)
+              .toList(),
+      latestProducts:
+          ((config['latest_products'] as List?) ?? const <dynamic>[])
+              .map(_toInt)
+              .where((id) => id > 0)
+              .toList(),
+      latestMode:
+          TextSanitizer.fix(config['latest_mode'] ?? 'auto').toLowerCase() ==
+              'manual'
+          ? 'manual'
+          : 'auto',
       updatedAt: TextSanitizer.fix(config['updated_at']),
       availableCategories:
           ((available['categories'] as List?) ?? const <dynamic>[])
@@ -881,6 +987,9 @@ class AdminOrderingConfigModel {
       'hidden_categories': hiddenCategories,
       'hidden_brands': hiddenBrands,
       'featured_products': featuredProducts,
+      'slider_products': sliderProducts,
+      'latest_products': latestProducts,
+      'latest_mode': latestMode,
     };
   }
 
@@ -890,6 +999,9 @@ class AdminOrderingConfigModel {
     List<int>? hiddenCategories,
     List<int>? hiddenBrands,
     List<int>? featuredProducts,
+    List<int>? sliderProducts,
+    List<int>? latestProducts,
+    String? latestMode,
     String? updatedAt,
     List<AdminTermModel>? availableCategories,
     List<AdminTermModel>? availableBrands,
@@ -901,11 +1013,156 @@ class AdminOrderingConfigModel {
       hiddenCategories: hiddenCategories ?? this.hiddenCategories,
       hiddenBrands: hiddenBrands ?? this.hiddenBrands,
       featuredProducts: featuredProducts ?? this.featuredProducts,
+      sliderProducts: sliderProducts ?? this.sliderProducts,
+      latestProducts: latestProducts ?? this.latestProducts,
+      latestMode: latestMode ?? this.latestMode,
       updatedAt: updatedAt ?? this.updatedAt,
       availableCategories: availableCategories ?? this.availableCategories,
       availableBrands: availableBrands ?? this.availableBrands,
       availableFeaturedProducts:
           availableFeaturedProducts ?? this.availableFeaturedProducts,
+    );
+  }
+}
+
+class AdminBrandCategoryLayoutEntry {
+  final String brandSlug;
+  final List<int> categoryIds;
+  final List<int> hiddenCategoryIds;
+  final String updatedAt;
+  final String revision;
+
+  const AdminBrandCategoryLayoutEntry({
+    required this.brandSlug,
+    required this.categoryIds,
+    required this.hiddenCategoryIds,
+    this.updatedAt = '',
+    this.revision = '',
+  });
+
+  factory AdminBrandCategoryLayoutEntry.fromJson(
+    String brandSlug,
+    dynamic value,
+  ) {
+    final json = _asMap(value);
+    return AdminBrandCategoryLayoutEntry(
+      brandSlug: brandSlug,
+      categoryIds: _parseAdminIdList(
+        json['category_ids'] ?? json['categories'],
+      ),
+      hiddenCategoryIds: _parseAdminIdList(
+        json['hidden_category_ids'] ?? json['hidden_categories'],
+      ),
+      updatedAt: TextSanitizer.fix(json['updated_at']),
+      revision: TextSanitizer.fix(json['revision']),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'category_ids': categoryIds,
+      'hidden_category_ids': hiddenCategoryIds,
+    };
+  }
+
+  AdminBrandCategoryLayoutEntry copyWith({
+    List<int>? categoryIds,
+    List<int>? hiddenCategoryIds,
+    String? updatedAt,
+    String? revision,
+  }) {
+    return AdminBrandCategoryLayoutEntry(
+      brandSlug: brandSlug,
+      categoryIds: categoryIds ?? this.categoryIds,
+      hiddenCategoryIds: hiddenCategoryIds ?? this.hiddenCategoryIds,
+      updatedAt: updatedAt ?? this.updatedAt,
+      revision: revision ?? this.revision,
+    );
+  }
+}
+
+class AdminBrandCategoryLayoutModel {
+  final Map<String, AdminBrandCategoryLayoutEntry> layout;
+  final List<AdminTermModel> availableBrands;
+  final List<AdminTermModel> availableCategories;
+
+  const AdminBrandCategoryLayoutModel({
+    required this.layout,
+    required this.availableBrands,
+    required this.availableCategories,
+  });
+
+  factory AdminBrandCategoryLayoutModel.fromPayload(dynamic payload) {
+    final json = _asMap(payload);
+    final rawLayout = json.containsKey('layout') ? json['layout'] : payload;
+    final available = _asMap(json['available']);
+    final layout = <String, AdminBrandCategoryLayoutEntry>{};
+
+    if (rawLayout is Map) {
+      rawLayout.forEach((key, value) {
+        final slug = TextSanitizer.fix(key).trim();
+        if (slug.isEmpty) return;
+        layout[slug] = AdminBrandCategoryLayoutEntry.fromJson(slug, value);
+      });
+    } else if (rawLayout is List) {
+      for (final value in rawLayout) {
+        final entry = _asMap(value);
+        final slug = TextSanitizer.fix(
+          entry['brand_slug'] ?? entry['slug'] ?? entry['brand'] ?? '',
+        ).trim();
+        if (slug.isEmpty) continue;
+        layout[slug] = AdminBrandCategoryLayoutEntry.fromJson(slug, entry);
+      }
+    }
+
+    return AdminBrandCategoryLayoutModel(
+      layout: layout,
+      availableBrands:
+          _asList(
+                available['brands'] ??
+                    json['brands'] ??
+                    json['available_brands'],
+              )
+              .whereType<Map>()
+              .map(
+                (item) =>
+                    AdminTermModel.fromJson(Map<String, dynamic>.from(item)),
+              )
+              .toList(),
+      availableCategories:
+          _asList(
+                available['categories'] ??
+                    json['categories'] ??
+                    json['available_categories'],
+              )
+              .whereType<Map>()
+              .map(
+                (item) =>
+                    AdminTermModel.fromJson(Map<String, dynamic>.from(item)),
+              )
+              .toList(),
+    );
+  }
+
+  factory AdminBrandCategoryLayoutModel.fromJson(Map<String, dynamic> json) {
+    return AdminBrandCategoryLayoutModel.fromPayload(json);
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'layout': layout.map((key, value) => MapEntry(key, value.toJson())),
+    };
+  }
+
+  AdminBrandCategoryLayoutModel copyWith({
+    Map<String, AdminBrandCategoryLayoutEntry>? layout,
+    List<AdminTermModel>? availableBrands,
+    List<AdminTermModel>? availableCategories,
+  }) {
+    return AdminBrandCategoryLayoutModel(
+      layout: layout ?? this.layout,
+      availableBrands: availableBrands ?? this.availableBrands,
+      availableCategories: availableCategories ?? this.availableCategories,
     );
   }
 }

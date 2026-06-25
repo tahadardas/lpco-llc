@@ -5,6 +5,10 @@ import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/product_card.dart';
 
 void main() {
+  Future<void> settleCard(WidgetTester tester) async {
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   ProductModel buildProduct() {
     return const ProductModel(
       id: 101,
@@ -98,6 +102,7 @@ void main() {
   Widget buildHarness({
     required Size size,
     ProductModel? product,
+    bool isGuest = false,
     ValueChanged<ProductCardUnit>? onAddToCart,
   }) {
     return MaterialApp(
@@ -113,7 +118,7 @@ void main() {
                 height: size.height,
                 child: ProductCard(
                   product: product ?? buildProduct(),
-                  isGuest: false,
+                  isGuest: isGuest,
                   isSaved: false,
                   currencyCode: 'SYP',
                   userGroup: 'retail',
@@ -141,7 +146,7 @@ void main() {
     addTearDown(() => FlutterError.onError = oldOnError);
 
     await tester.pumpWidget(buildHarness(size: const Size(212, 420)));
-    await tester.pumpAndSettle();
+    await settleCard(tester);
 
     final hasOverflow = reported.any(
       (e) => e.exceptionAsString().contains('A RenderFlex overflowed'),
@@ -156,6 +161,44 @@ void main() {
     expect(hasInfiniteWidth, isFalse);
   });
 
+  Future<void> expectResponsiveCard({
+    required WidgetTester tester,
+    required Size screenSize,
+    required bool isGuest,
+  }) async {
+    final oldOnError = FlutterError.onError;
+    final reported = <FlutterErrorDetails>[];
+    FlutterError.onError = reported.add;
+    addTearDown(() => FlutterError.onError = oldOnError);
+
+    final cardWidth = (screenSize.width - 42) / 2;
+    final cardHeight = ProductCard.preferredGridExtent(isGuest: isGuest);
+    await tester.pumpWidget(
+      buildHarness(size: Size(cardWidth, cardHeight), isGuest: isGuest),
+    );
+    await settleCard(tester);
+
+    expect(
+      reported.where(
+        (details) =>
+            details.exceptionAsString().contains('A RenderFlex overflowed'),
+      ),
+      isEmpty,
+    );
+    expect(
+      find.byKey(const ValueKey('product_card_add_button')),
+      findsOneWidget,
+    );
+  }
+
+  testWidgets('logged-in card has no overflow at 412px', (tester) async {
+    await expectResponsiveCard(
+      tester: tester,
+      screenSize: const Size(412, 915),
+      isGuest: false,
+    );
+  });
+
   testWidgets('requires explicit unit selection before adding from the card', (
     tester,
   ) async {
@@ -167,7 +210,7 @@ void main() {
         onAddToCart: (unit) => addedUnit = unit,
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCard(tester);
 
     final addButtonFinder = find.byKey(
       const ValueKey<String>('product_card_add_button'),
@@ -185,17 +228,17 @@ void main() {
     );
 
     await tester.tap(addButtonFinder);
-    await tester.pumpAndSettle();
+    await settleCard(tester);
     expect(addedUnit, isNull);
 
     await tester.tap(
       find.byKey(const ValueKey<String>('product_card_unit_piece')),
     );
-    await tester.pumpAndSettle();
+    await settleCard(tester);
     expect(tester.widget<FilledButton>(addButtonFinder).onPressed, isNotNull);
 
     await tester.tap(addButtonFinder);
-    await tester.pumpAndSettle();
+    await settleCard(tester);
     expect(addedUnit, isNotNull);
     expect(addedUnit!.type, 'piece');
   });
@@ -211,7 +254,7 @@ void main() {
         onAddToCart: (unit) => addedUnit = unit,
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCard(tester);
 
     expect(
       find.byKey(const ValueKey<String>('product_card_unit_piece')),
@@ -228,7 +271,7 @@ void main() {
     expect(tester.widget<FilledButton>(addButtonFinder).onPressed, isNotNull);
 
     await tester.tap(addButtonFinder);
-    await tester.pumpAndSettle();
+    await settleCard(tester);
     expect(addedUnit, isNotNull);
     expect(addedUnit!.type, 'piece');
   });

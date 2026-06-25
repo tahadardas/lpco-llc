@@ -13,6 +13,7 @@ enum AdminModuleKind {
   products,
   reviews,
   ordering,
+  brandCategoryLayout,
 }
 
 enum AdminModuleSupport { fullControl, readOnly, partial, unavailable }
@@ -87,7 +88,7 @@ const List<AdminModule> kAdminModuleDefinitions = <AdminModule>[
     id: 'stats',
     kind: AdminModuleKind.stats,
     title: 'لوحة التحكم',
-    description: 'مؤشرات الأداء، النشاط الأخير، وصحة النظام.',
+    description: 'مؤشرات الأداء والنشاط الأخير وصحة النظام.',
     support: AdminModuleSupport.readOnly,
     canRead: true,
   ),
@@ -95,7 +96,7 @@ const List<AdminModule> kAdminModuleDefinitions = <AdminModule>[
     id: 'orders',
     kind: AdminModuleKind.orders,
     title: 'إدارة الطلبات',
-    description: 'البحث، الفلترة، تحديث الحالة، والفاتورة.',
+    description: 'البحث والتصفية وتحديث الحالة والفاتورة.',
   ),
   AdminModule(
     id: 'users',
@@ -113,7 +114,7 @@ const List<AdminModule> kAdminModuleDefinitions = <AdminModule>[
     id: 'settings',
     kind: AdminModuleKind.settings,
     title: 'إعدادات التطبيق',
-    description: 'التجارة، الحماية، التكاملات، والبريد الإداري.',
+    description: 'التجارة والحماية والتكاملات والبريد الإداري.',
   ),
   AdminModule(
     id: 'diagnostics',
@@ -125,37 +126,19 @@ const List<AdminModule> kAdminModuleDefinitions = <AdminModule>[
     id: 'notifications',
     kind: AdminModuleKind.notifications,
     title: 'مركز الإشعارات',
-    description: 'إرسال الإشعارات، التاريخ، والإحصاءات.',
+    description: 'إرسال الإشعارات والتاريخ والإحصاءات.',
   ),
   AdminModule(
     id: 'home-banner',
     kind: AdminModuleKind.homeBanner,
-    title: 'بانر الرئيسية',
-    description: 'إدارة البانر الرئيسي المستخدم داخل التطبيق.',
-  ),
-  AdminModule(
-    id: 'home-layout',
-    kind: AdminModuleKind.homeLayout,
-    title: 'تخطيط الرئيسية',
-    description: 'ترتيب أقسام الصفحة الرئيسية وتكوينها.',
-  ),
-  AdminModule(
-    id: 'app-theme',
-    kind: AdminModuleKind.appTheme,
-    title: 'ثيم التطبيق',
-    description: 'ألوان وثيم التطبيق القادمة من اللوحة.',
-  ),
-  AdminModule(
-    id: 'popup-config',
-    kind: AdminModuleKind.popupConfig,
-    title: 'النافذة المنبثقة',
-    description: 'التحكم في الإعلان المنبثق وتوجيهه.',
+    title: 'بنر الرئيسية',
+    description: 'إدارة بنرات الصفحة الرئيسية المستخدمة داخل التطبيق.',
   ),
   AdminModule(
     id: 'products',
     kind: AdminModuleKind.products,
     title: 'إدارة المنتجات',
-    description: 'البحث، الفلاتر، والحقول التشغيلية الآمنة للمنتج.',
+    description: 'البحث والفلاتر والحقول التشغيلية الآمنة للمنتج.',
   ),
   AdminModule(
     id: 'reviews',
@@ -166,7 +149,15 @@ const List<AdminModule> kAdminModuleDefinitions = <AdminModule>[
   AdminModule(
     id: 'ordering',
     kind: AdminModuleKind.ordering,
-    title: 'ترتيب الواجهة',
-    description: 'ترتيب المنتجات المميزة والتصنيفات والعلامات.',
+    title: 'محتوى الصفحة الرئيسية',
+    description:
+        'إدارة السلايدر والمنتجات المميزة وأحدث المنتجات وترتيب ظهورها لجميع الأعضاء.',
+  ),
+  AdminModule(
+    id: 'brand-category-layout',
+    kind: AdminModuleKind.brandCategoryLayout,
+    title: 'تصنيفات العلامات التجارية',
+    description:
+        'ربط وترتيب وإخفاء تصنيفات كل علامة تجارية كما تظهر داخل التطبيق.',
   ),
 ];

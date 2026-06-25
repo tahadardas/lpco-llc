@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lpco_llc/core/config/app_config.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 
 void main() {
@@ -21,6 +22,36 @@ void main() {
     expect(
       product.barcodes,
       containsAll(<String>['123456789', '987654321', '555555555', '333333333']),
+    );
+  });
+
+  test('normalizes product image urls and keeps optimized card source', () {
+    final product = ProductModel.fromJson(<String, dynamic>{
+      'id': 11,
+      'name': 'دفتر عربي',
+      'slug': 'arabic-notebook',
+      'image_url': r'https:\/\/example.test\/uploads\/product image.jpg',
+      'images': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': '9',
+          'src': r'https:\/\/example.test\/uploads\/product image.jpg',
+          'thumbnail_src': '/wp-content/uploads/product-thumb image.jpg',
+        },
+        <String, dynamic>{
+          'id': 9,
+          'src': 'https://example.test/uploads/product%20image.jpg',
+        },
+      ],
+    });
+
+    expect(product.images, hasLength(1));
+    expect(
+      product.images.first.src,
+      'https://example.test/uploads/product%20image.jpg',
+    );
+    expect(
+      product.images.first.cardSrc,
+      '${AppConfig.baseUrl}/wp-content/uploads/product-thumb%20image.jpg',
     );
   });
 }

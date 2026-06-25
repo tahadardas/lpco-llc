@@ -62,5 +62,7 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>نستخدم Face ID أو البصمة لحماية دخولك إلى التطبيق.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>نحتاج إذنك لحفظ صور المنتجات في معرض الصور.</string>
 </dict>
 </plist>

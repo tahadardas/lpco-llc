@@ -30,6 +30,7 @@ class AdminDashboardScreen extends StatelessWidget {
             showBack: true,
             actions: <Widget>[
               IconButton(
+                tooltip: 'تسجيل الخروج',
                 icon: const Icon(Icons.logout_rounded),
                 onPressed: () async {
                   final cartCubit = context.read<CartCubit>();
@@ -66,7 +67,9 @@ class AdminDashboardScreen extends StatelessWidget {
                   .toList();
 
               return RefreshIndicator(
-                onRefresh: () => context.read<AdminCubit>().fetchDashboard(),
+                onRefresh: () => context.read<AdminCubit>().fetchDashboard(
+                  forceRefresh: true,
+                ),
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 92, 16, 24),
                   children: <Widget>[
@@ -94,7 +97,7 @@ class AdminDashboardScreen extends StatelessWidget {
                     const SizedBox(height: 16),
                     _SectionTitle(
                       title: 'الوحدات',
-                      subtitle: 'القدرات الحقيقية القادمة من الخادم',
+                      subtitle: 'القدرات الفعلية القادمة من الخادم',
                     ),
                     const SizedBox(height: 10),
                     GridView.builder(
@@ -125,7 +128,7 @@ class AdminDashboardScreen extends StatelessWidget {
                     const SizedBox(height: 16),
                     _SectionTitle(
                       title: 'آخر النشاط',
-                      subtitle: 'طلبات، أعضاء، وإشعارات حديثة',
+                      subtitle: 'طلبات وأعضاء وإشعارات حديثة',
                     ),
                     const SizedBox(height: 10),
                     _ActivityBlock(
@@ -136,7 +139,7 @@ class AdminDashboardScreen extends StatelessWidget {
                             (order) => _SimpleRow(
                               title: 'طلب #${order.number}',
                               subtitle:
-                                  '${order.customer} • ${order.statusLabel}',
+                                  '${order.customer} - ${order.statusLabel}',
                               trailing: PriceFormatter.format(
                                 order.total,
                                 currencyCode: order.currency,
@@ -159,7 +162,7 @@ class AdminDashboardScreen extends StatelessWidget {
                                   ? member.username
                                   : member.name,
                               subtitle:
-                                  '${member.group} • ${member.accountStatus}',
+                                  '${member.group} - ${member.accountStatus}',
                               trailing: member.phone,
                             ),
                           )
@@ -174,7 +177,7 @@ class AdminDashboardScreen extends StatelessWidget {
                             (entry) => _SimpleRow(
                               title: entry.title,
                               subtitle:
-                                  '${entry.audience} • مقروء ${entry.readCount}',
+                                  '${entry.audience} - مقروء ${entry.readCount}',
                               trailing: '${entry.deliveredCount}',
                             ),
                           )
@@ -690,7 +693,9 @@ class _DashboardError extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               FilledButton(
-                onPressed: () => context.read<AdminCubit>().fetchDashboard(),
+                onPressed: () => context.read<AdminCubit>().fetchDashboard(
+                  forceRefresh: true,
+                ),
                 child: const Text('إعادة المحاولة'),
               ),
             ],

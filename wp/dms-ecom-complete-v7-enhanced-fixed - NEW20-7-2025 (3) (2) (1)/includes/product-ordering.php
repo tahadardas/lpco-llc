@@ -64,6 +64,22 @@ function dms_apply_product_ordering_args($args, $order_meta_key = '_custom_produ
     return $args;
 }
 
+function dms_apply_woocommerce_product_menu_order_args($args) {
+    if (!is_array($args)) {
+        $args = array();
+    }
+
+    unset($args['meta_key'], $args['dms_order_meta_key']);
+    $args['orderby'] = array(
+        'menu_order' => 'ASC',
+        'title' => 'ASC',
+        'ID' => 'ASC',
+    );
+    $args['order'] = 'ASC';
+
+    return $args;
+}
+
 function dms_product_ordering_posts_clauses($clauses, $query) {
     $order_meta_key = $query instanceof WP_Query ? $query->get('dms_order_meta_key') : '';
     if (!is_string($order_meta_key) || $order_meta_key === '') {
@@ -93,7 +109,7 @@ function dms_product_ordering_posts_clauses($clauses, $query) {
         ? intval(DMS_ECOM_CUSTOM_PRODUCT_ORDER_DEFAULT)
         : 999999;
 
-    $clauses['orderby'] = "CASE WHEN {$alias}.meta_value IS NULL OR {$alias}.meta_value = '' THEN {$default_order} ELSE CAST({$alias}.meta_value AS SIGNED) END ASC, {$wpdb->posts}.post_date DESC, {$wpdb->posts}.ID DESC";
+    $clauses['orderby'] = "CASE WHEN {$alias}.meta_value IS NULL OR {$alias}.meta_value = '' THEN {$default_order} ELSE CAST({$alias}.meta_value AS SIGNED) END ASC, {$wpdb->posts}.menu_order ASC, {$wpdb->posts}.post_date DESC, {$wpdb->posts}.ID DESC";
 
     return $clauses;
 }

@@ -6,6 +6,7 @@ class CategoryModel {
   final String slug;
   final int parentId;
   final int count;
+  final int? brandScopedProductCount;
   final String imageUrl;
   final int menuOrder;
   final bool isFeatured;
@@ -18,6 +19,7 @@ class CategoryModel {
     required this.slug,
     this.parentId = 0,
     required this.count,
+    this.brandScopedProductCount,
     required this.imageUrl,
     this.menuOrder = 0,
     this.isFeatured = false,
@@ -53,6 +55,11 @@ class CategoryModel {
       count: json['count'] is int
           ? json['count'] as int
           : int.tryParse('${json['count'] ?? '0'}') ?? 0,
+      brandScopedProductCount: json.containsKey('product_count')
+          ? (json['product_count'] is int
+                ? json['product_count'] as int
+                : int.tryParse('${json['product_count']}'))
+          : null,
       imageUrl: resolveImage().trim(),
       menuOrder: json['menu_order'] is int
           ? json['menu_order'] as int

@@ -1,4 +1,6 @@
 <?php
+namespace DMS\Ecom;
+
 /**
  * Security Module - DMS Ecom
  * مركز الأمان الموحد
@@ -7,8 +9,6 @@
 if (!defined('ABSPATH')) {
     exit;
 }
-
-namespace DMS\Ecom;
 
 class Security {
     /**

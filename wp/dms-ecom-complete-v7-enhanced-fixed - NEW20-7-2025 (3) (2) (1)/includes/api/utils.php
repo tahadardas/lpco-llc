@@ -394,6 +394,7 @@ function dms_ecom_get_app_order_meta_key($brand_slug = '') {
                 return dms_app_order_meta_key($term->term_id);
             }
         }
+        return '';
     }
     $enabled = get_option(dms_app_order_enabled_key(0));
     if ($enabled) {
@@ -414,6 +415,9 @@ function dms_ecom_manual_latest_enabled() {
  */
 if (!function_exists('dms_ecom_get_product_order_value')) {
 function dms_ecom_get_product_order_value($product_id, $product_meta = array(), $order_meta_key = '_custom_product_order') {
+    if (!is_string($order_meta_key) || $order_meta_key === '') {
+        return function_exists('get_post_field') ? intval(get_post_field('menu_order', $product_id)) : 0;
+    }
     $order_meta_key = is_string($order_meta_key) && $order_meta_key !== ''
         ? $order_meta_key
         : '_custom_product_order';

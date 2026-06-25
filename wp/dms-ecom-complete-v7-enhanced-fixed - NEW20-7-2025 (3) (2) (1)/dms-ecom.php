@@ -64,6 +64,13 @@ if (!defined('JWT_AUTH_CORS_ENABLE')) {
     define('JWT_AUTH_CORS_ENABLE', true);
 }
 
+// Preserve member sessions for the long-lived mobile app. The client still
+// clears its local session immediately when the member explicitly logs out.
+add_filter('jwt_auth_expire', function ($expire, $issued_at) {
+    $ten_years = defined('YEAR_IN_SECONDS') ? YEAR_IN_SECONDS * 10 : 315360000;
+    return intval($issued_at) + $ten_years;
+}, 10, 2);
+
 // Toggle plugin debug logging (kept false in production to avoid noisy logs)
 if (!defined('DMS_ECOM_DEBUG')) {
     $dms_settings = get_option('dms_app_settings', array());
@@ -99,6 +106,7 @@ include_once DMS_ECOM_PATH . 'includes/api/user-logic.php';
 include_once DMS_ECOM_PATH . 'includes/admin-dashboard.php';
 include_once DMS_ECOM_PATH . 'includes/admin-endpoints.php';
 include_once DMS_ECOM_PATH . 'includes/app-home-layout.php';
+include_once DMS_ECOM_PATH . 'includes/app-content-admin.php';
 include_once DMS_ECOM_PATH . 'includes/app-product-order-csv.php';
 include_once DMS_ECOM_PATH . 'includes/invoices.php';
 include_once DMS_ECOM_PATH . 'includes/payment-gateway-sham-cash.php';

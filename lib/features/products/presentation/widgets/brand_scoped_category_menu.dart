@@ -18,6 +18,7 @@ class BrandScopedCategoryMenu extends StatefulWidget {
   final FutureOr<void> Function() onClearCategory;
   final BrandScopedCategoryMenuSource menuSource;
   final bool allowConfiguredFallback;
+  final bool hasAuthoritativeCategories;
 
   const BrandScopedCategoryMenu({
     super.key,
@@ -31,6 +32,7 @@ class BrandScopedCategoryMenu extends StatefulWidget {
     this.productDerivedCategoryIds = const <int>{},
     this.menuSource = const LocalBrandScopedCategoryMenuSource(),
     this.allowConfiguredFallback = false,
+    this.hasAuthoritativeCategories = false,
   });
 
   @override
@@ -52,112 +54,163 @@ class _BrandScopedCategoryMenuState extends State<BrandScopedCategoryMenu> {
       productDerivedCategoryIds: widget.productDerivedCategoryIds,
       allowConfiguredFallback: widget.allowConfiguredFallback,
     );
+    final hasApiCategories =
+        widget.hasAuthoritativeCategories ||
+        (widget.brand != null &&
+            (widget.brand!.linkedCategories.isNotEmpty ||
+                widget.brand!.linkedCategoryIds.isNotEmpty ||
+                widget.brand!.linkedCategorySlugs.isNotEmpty));
     final menu = resolvedMenu == null
         ? null
-        : resolver.filterByAvailableCategories(
-            menu: resolvedMenu,
-            availableCategoryIds: widget.productDerivedCategoryIds,
-          );
+        : (hasApiCategories
+              ? resolvedMenu
+              : resolver.filterByAvailableCategories(
+                  menu: resolvedMenu,
+                  availableCategoryIds: widget.productDerivedCategoryIds,
+                ));
     if (menu == null || menu.items.isEmpty) {
       return const SizedBox.shrink();
     }
 
     final selectedItem = menu.selectedItemFor(widget.selectedCategoryIds);
-    final items = menu.items;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     return Padding(
+      key: const ValueKey<String>('brand_scoped_category_menu'),
       padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
-      child: DecoratedBox(
-        key: const ValueKey<String>('brand_scoped_category_menu'),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFE4E9F1)),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.035),
-              blurRadius: 14,
-              offset: const Offset(0, 6),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          key: const ValueKey<String>('brand_scoped_category_button'),
+          style: OutlinedButton.styleFrom(
+            alignment: AlignmentDirectional.centerStart,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            side: const BorderSide(color: Color(0xFFD9E1EB)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            foregroundColor: colorScheme.onSurface,
+            backgroundColor: colorScheme.surface,
+          ),
+          onPressed: _isApplying
+              ? null
+              : () => _openCategorySheet(context, menu, selectedItem),
+          icon: Icon(Icons.tune_rounded, color: colorScheme.primary),
+          label: Row(
             children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Icon(
-                    Icons.category_outlined,
-                    size: 20,
-                    color: colorScheme.primary,
+              Expanded(
+                child: Text(
+                  selectedItem == null ? _titleFor(menu) : selectedItem.labelAr,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _titleFor(menu),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 42,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: items.length + 1,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    if (index == 0) {
-                      return ChoiceChip(
-                        key: const ValueKey<String>(
-                          'brand_scoped_category_all',
-                        ),
-                        label: const Text('\u0627\u0644\u0643\u0644'),
-                        avatar: const Icon(Icons.apps_rounded, size: 17),
-                        selected: selectedItem == null,
-                        showCheckmark: false,
-                        onSelected: _isApplying ? null : (_) => _handleClear(),
-                      );
-                    }
-
-                    final item = items[index - 1];
-                    final isSelected =
-                        selectedItem?.categoryId == item.categoryId;
-                    return ChoiceChip(
-                      key: ValueKey<String>(
-                        'brand_scoped_category_item_${item.stableKey}',
-                      ),
-                      label: Text(_labelFor(item.category)),
-                      avatar: const Icon(Icons.grid_view_rounded, size: 16),
-                      selected: isSelected,
-                      showCheckmark: false,
-                      selectedColor: colorScheme.primaryContainer,
-                      backgroundColor: colorScheme.surface,
-                      side: BorderSide(
-                        color: isSelected
-                            ? colorScheme.primary
-                            : const Color(0xFFD9E1EB),
-                      ),
-                      onSelected: _isApplying
-                          ? null
-                          : (_) => _handleSelect(item),
-                    );
-                  },
                 ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: colorScheme.primary,
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _openCategorySheet(
+    BuildContext context,
+    ResolvedBrandScopedCategoryMenu menu,
+    ResolvedBrandScopedCategoryItem? selectedItem,
+  ) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return Directionality(
+          textDirection: Directionality.of(context),
+          child: SafeArea(
+            child: ConstrainedBox(
+              key: const ValueKey<String>('brand_scoped_category_sheet'),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      _titleFor(menu),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        ChoiceChip(
+                          key: const ValueKey<String>(
+                            'brand_scoped_category_all',
+                          ),
+                          label: const Text('\u0627\u0644\u0643\u0644'),
+                          avatar: const Icon(Icons.apps_rounded, size: 17),
+                          selected: selectedItem == null,
+                          showCheckmark: false,
+                          selectedColor: colorScheme.primaryContainer,
+                          onSelected: _isApplying
+                              ? null
+                              : (_) {
+                                  Navigator.of(sheetContext).pop();
+                                  _handleClear();
+                                },
+                        ),
+                        ...menu.items.map((item) {
+                          final isSelected =
+                              selectedItem?.categoryId == item.categoryId;
+                          return ChoiceChip(
+                            key: ValueKey<String>(
+                              'brand_scoped_category_item_${item.stableKey}',
+                            ),
+                            label: Text(_labelFor(item.category)),
+                            avatar: const Icon(
+                              Icons.grid_view_rounded,
+                              size: 16,
+                            ),
+                            selected: isSelected,
+                            showCheckmark: false,
+                            selectedColor: colorScheme.primaryContainer,
+                            backgroundColor: colorScheme.surface,
+                            side: BorderSide(
+                              color: isSelected
+                                  ? colorScheme.primary
+                                  : const Color(0xFFD9E1EB),
+                            ),
+                            onSelected: _isApplying
+                                ? null
+                                : (_) {
+                                    Navigator.of(sheetContext).pop();
+                                    _handleSelect(item);
+                                  },
+                          );
+                        }),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -170,10 +223,6 @@ class _BrandScopedCategoryMenuState extends State<BrandScopedCategoryMenu> {
   }
 
   String _labelFor(CategoryModel category) {
-    // category.count is the global WooCommerce count across ALL brands.
-    // Displaying it in a brand-scoped context is misleading (e.g. showing 53
-    // for "pencils" when only 1 belongs to this brand). Show name only until
-    // a reliable brand-scoped count is available from the backend.
     return category.name;
   }
 

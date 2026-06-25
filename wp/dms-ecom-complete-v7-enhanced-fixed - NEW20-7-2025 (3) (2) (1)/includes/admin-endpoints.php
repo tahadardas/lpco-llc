@@ -14,6 +14,12 @@ add_action('rest_api_init', function () {
         'permission_callback' => 'dms_admin_permissions',
     ));
 
+    register_rest_route('dms/v1/admin', '/whoami', array(
+        'methods' => WP_REST_Server::READABLE,
+        'callback' => 'dms_admin_whoami',
+        'permission_callback' => 'dms_admin_permissions',
+    ));
+
     register_rest_route('dms/v1/admin', '/stats', array(
         'methods' => WP_REST_Server::READABLE,
         'callback' => 'dms_admin_get_stats',
@@ -117,6 +123,15 @@ add_action('rest_api_init', function () {
         'permission_callback' => 'dms_admin_permissions',
     ));
 
+    register_rest_route('dms/v1/admin', '/brand-diagnostics', array(
+        'methods' => WP_REST_Server::READABLE,
+        'callback' => 'dms_admin_brand_diagnostics',
+        'permission_callback' => 'dms_admin_permissions',
+        'args' => array(
+            'brand_slug' => array('sanitize_callback' => 'sanitize_title'),
+        ),
+    ));
+
     register_rest_route('dms/v1/admin', '/products', array(
         'methods' => WP_REST_Server::READABLE,
         'callback' => 'dms_admin_get_products_v2',
@@ -174,6 +189,19 @@ add_action('rest_api_init', function () {
         ),
     ));
 
+    register_rest_route('dms/v1/admin', '/home-banners', array(
+        array(
+            'methods' => WP_REST_Server::READABLE,
+            'callback' => 'dms_admin_get_home_banners_v2',
+            'permission_callback' => 'dms_admin_permissions',
+        ),
+        array(
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => 'dms_admin_save_home_banners_v2',
+            'permission_callback' => 'dms_admin_permissions',
+        ),
+    ));
+
     register_rest_route('dms/v1/admin', '/home-layout', array(
         array(
             'methods' => WP_REST_Server::READABLE,
@@ -225,6 +253,19 @@ add_action('rest_api_init', function () {
             'permission_callback' => 'dms_admin_permissions',
         ),
     ));
+
+    register_rest_route('dms/v1/admin', '/brand-category-layout', array(
+        array(
+            'methods' => WP_REST_Server::READABLE,
+            'callback' => 'dms_admin_get_brand_category_layout_v2',
+            'permission_callback' => 'dms_admin_permissions',
+        ),
+        array(
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => 'dms_admin_save_brand_category_layout_v2',
+            'permission_callback' => 'dms_admin_permissions',
+        ),
+    ));
 });
 
 if (!function_exists('dms_admin_permissions')) {
@@ -244,6 +285,67 @@ if (!function_exists('dms_admin_permissions')) {
             return new WP_Error('rest_forbidden', __('ليس لديك صلاحية للوصول', 'dms-ecom'), array('status' => 403));
         }
         return true;
+    }
+}
+
+if (!function_exists('dms_admin_whoami')) {
+    function dms_admin_whoami(WP_REST_Request $request) {
+        $user_id = get_current_user_id();
+        $user = $user_id > 0 ? get_userdata($user_id) : null;
+        return dms_admin_detail_response(array(
+            'success' => true,
+            'logged_in' => is_user_logged_in(),
+            'user_id' => (int) $user_id,
+            'username' => $user ? (string) $user->user_login : '',
+            'email' => $user ? (string) $user->user_email : '',
+            'roles' => $user ? array_values((array) $user->roles) : array(),
+            'can_manage_woocommerce' => current_user_can('manage_woocommerce'),
+            'can_manage_options' => current_user_can('manage_options'),
+        ));
+    }
+}
+
+if (!function_exists('dms_admin_get_brand_category_layout_v2')) {
+    function dms_admin_get_brand_category_layout_v2(WP_REST_Request $request) {
+        $brand_taxonomy = function_exists('dms_admin_product_brand_taxonomy_v2')
+            ? dms_admin_product_brand_taxonomy_v2()
+            : ((function_exists('taxonomy_exists') && taxonomy_exists('product_brand')) ? 'product_brand' : 'product_tag');
+        $layout = function_exists('lpco_brand_category_layout_get') ? lpco_brand_category_layout_get() : array();
+        return dms_admin_detail_response(array(
+            'layout' => $layout,
+            'available' => array(
+                'brands' => dms_admin_ordering_term_list_v2($brand_taxonomy),
+                'categories' => dms_admin_ordering_term_list_v2('product_cat'),
+            ),
+        ));
+    }
+}
+
+if (!function_exists('dms_admin_save_brand_category_layout_v2')) {
+    function dms_admin_save_brand_category_layout_v2(WP_REST_Request $request) {
+        $body = dms_admin_request_body_v2($request);
+        $raw_layout = isset($body['layout']) && is_array($body['layout']) ? $body['layout'] : $body;
+        $normalized = array();
+        foreach ((array) $raw_layout as $brand_slug => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $slug = is_string($brand_slug) && !is_numeric($brand_slug)
+                ? sanitize_title((string) $brand_slug)
+                : sanitize_title((string) ($entry['brand_slug'] ?? $entry['slug'] ?? $entry['brand'] ?? ''));
+            if ($slug === '') {
+                continue;
+            }
+            $normalized[$slug] = array(
+                'category_ids' => dms_admin_parse_id_list($entry['category_ids'] ?? array()),
+                'hidden_category_ids' => dms_admin_parse_id_list($entry['hidden_category_ids'] ?? array()),
+                'updated_at' => function_exists('current_time') ? current_time('mysql', true) : gmdate('Y-m-d H:i:s'),
+            );
+        }
+        $saved = function_exists('lpco_brand_category_layout_save')
+            ? lpco_brand_category_layout_save($normalized)
+            : $normalized;
+        return dms_admin_action_response('تم حفظ تصنيفات العلامات التجارية بنجاح.', array('layout' => $saved));
     }
 }
 
@@ -382,21 +484,40 @@ if (!function_exists('dms_admin_module_capability_rows')) {
             array('id' => 'diagnostics', 'title' => 'التشخيص', 'support' => 'read_only', 'can_read' => true, 'can_write' => false),
             array('id' => 'notifications', 'title' => 'مركز الإشعارات', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
             array('id' => 'home-banner', 'title' => 'بانر الرئيسية', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
-            array('id' => 'home-layout', 'title' => 'تخطيط الرئيسية', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
-            array('id' => 'app-theme', 'title' => 'ثيم التطبيق', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
-            array('id' => 'popup-config', 'title' => 'الإعلان المنبثق', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
             array('id' => 'products', 'title' => 'إدارة المنتجات', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
             array('id' => 'reviews', 'title' => 'مراجعة التقييمات', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
-            array('id' => 'ordering', 'title' => 'ترتيب الواجهة', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
+            array('id' => 'ordering', 'title' => 'محتوى الصفحة الرئيسية', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
+            array('id' => 'brand-category-layout', 'title' => 'تصنيفات العلامات التجارية', 'support' => 'full_control', 'can_read' => true, 'can_write' => true),
         );
     }
 }
 
 if (!function_exists('dms_admin_get_capabilities')) {
     function dms_admin_get_capabilities(WP_REST_Request $request) {
+        $modules = dms_admin_module_capability_rows();
+        $titles = array(
+            'orders' => 'إدارة الطلبات',
+            'users' => 'إدارة المستخدمين',
+            'members' => 'إدارة الأعضاء',
+            'settings' => 'إعدادات التطبيق',
+            'diagnostics' => 'التشخيص',
+            'notifications' => 'مركز الإشعارات',
+            'home-banner' => 'بنر الرئيسية',
+            'products' => 'إدارة المنتجات',
+            'reviews' => 'مراجعة التقييمات',
+            'ordering' => 'محتوى الصفحة الرئيسية',
+            'brand-category-layout' => 'تصنيفات العلامات التجارية',
+        );
+        foreach ($modules as &$module) {
+            $module_id = isset($module['id']) ? (string) $module['id'] : '';
+            if ($module_id !== '' && isset($titles[$module_id])) {
+                $module['title'] = $titles[$module_id];
+            }
+        }
+        unset($module);
         return dms_admin_detail_response(array(
             'generated_at' => current_time('c'),
-            'modules' => dms_admin_module_capability_rows(),
+            'modules' => $modules,
         ));
     }
 }
@@ -405,10 +526,11 @@ if (!function_exists('dms_admin_calculate_stats')) {
     /**
      * Helper to calculate dashboard statistics - Optimized for high performance and low memory
      */
-    function dms_admin_calculate_stats() {
+    function dms_admin_calculate_stats($force_refresh = false) {
         $cache_key = 'dms_admin_stats_cache';
-        $cached = get_transient($cache_key);
-        if ($cached !== false && is_array($cached)) {
+        $force_refresh = (bool) $force_refresh;
+        $cached = $force_refresh ? false : get_transient($cache_key);
+        if (!$force_refresh && $cached !== false && is_array($cached)) {
             return $cached;
         }
 
@@ -528,26 +650,38 @@ if (!function_exists('dms_admin_calculate_stats')) {
                 'warnings' => $diagnostics['warnings'] ?? array(),
             );
 
-            set_transient($cache_key, $stats, 600); // 10 minutes cache
+            if (!$force_refresh) {
+                set_transient($cache_key, $stats, 600); // 10 minutes cache
+            }
             return $stats;
         } catch (Throwable $e) {
             error_log('Admin Stats Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-            return array(
-                'orders_today' => 0,
-                'orders_month' => 0,
-                'revenue_month' => 0,
-                'total_members' => 0,
-                'pending_orders' => 0,
-                'completed_orders' => 0,
-                'unread_notifications_count' => 0,
-                'device_tokens_count' => 0,
-                'low_stock_products_count' => 0,
-                'latest_orders' => array(),
-                'latest_members' => array(),
-                'latest_notifications' => array(),
-                'warnings' => array('Error calculating stats: ' . $e->getMessage()),
-            );
+            return dms_admin_empty_stats_payload('تعذر حساب إحصاءات لوحة الإدارة: ' . $e->getMessage());
         }
+    }
+}
+
+if (!function_exists('dms_admin_empty_stats_payload')) {
+    function dms_admin_empty_stats_payload($warning = '') {
+        $warnings = array();
+        if ($warning !== '') {
+            $warnings[] = (string) $warning;
+        }
+        return array(
+            'orders_today' => 0,
+            'orders_month' => 0,
+            'revenue_month' => 0,
+            'total_members' => 0,
+            'pending_orders' => 0,
+            'completed_orders' => 0,
+            'unread_notifications_count' => 0,
+            'device_tokens_count' => 0,
+            'low_stock_products_count' => 0,
+            'latest_orders' => array(),
+            'latest_members' => array(),
+            'latest_notifications' => array(),
+            'warnings' => $warnings,
+        );
     }
 }
 
@@ -644,7 +778,15 @@ if (!function_exists('dms_admin_low_stock_products_count')) {
 
 if (!function_exists('dms_admin_get_stats')) {
     function dms_admin_get_stats(WP_REST_Request $request) {
-        return dms_admin_detail_response(dms_admin_calculate_stats());
+        $force_refresh = function_exists('dms_ecom_truthy_param')
+            ? dms_ecom_truthy_param($request->get_param('force_refresh'))
+            : intval($request->get_param('force_refresh')) === 1;
+        try {
+            return dms_admin_detail_response(dms_admin_calculate_stats($force_refresh));
+        } catch (Throwable $e) {
+            error_log('Admin Stats Endpoint Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+            return dms_admin_detail_response(dms_admin_empty_stats_payload('تعذر تحميل إحصاءات لوحة الإدارة حالياً.'));
+        }
     }
 }
 
@@ -867,7 +1009,7 @@ if (!function_exists('dms_admin_get_order_details')) {
             return new WP_Error('order_not_found', __('Order not found', 'dms-ecom'), array('status' => 404));
         }
         if (function_exists('dms_admin_order_matches_warehouse') && !dms_admin_order_matches_warehouse($order, '')) {
-            return new WP_Error('rest_forbidden', __('Ù„ÙŠØ³ Ù„Ø¯ÙŠÙƒ ØµÙ„Ø§Ø­ÙŠØ© Ù„Ù„ÙˆØµÙˆÙ„', 'dms-ecom'), array('status' => 403));
+            return new WP_Error('rest_forbidden', __('ليس لديك صلاحية للوصول', 'dms-ecom'), array('status' => 403));
         }
 
         $items = array();
@@ -1478,6 +1620,7 @@ if (!function_exists('dms_admin_term_payload_v2')) {
             'name' => (string) $term->name,
             'slug' => (string) $term->slug,
             'image_url' => $image_url,
+            'menu_order' => (int) get_term_meta($term->term_id, 'menu_order', true),
             'show_in_app' => !$is_hidden,
             'hidden' => $is_hidden,
         );
@@ -1493,6 +1636,57 @@ if (!function_exists('dms_admin_product_brand_taxonomy_v2')) {
             return 'product_tag';
         }
         return '';
+    }
+}
+
+if (!function_exists('dms_admin_brand_diagnostics')) {
+    function dms_admin_brand_diagnostics(WP_REST_Request $request) {
+        $brand_slug = sanitize_title((string) $request->get_param('brand_slug'));
+        if ($brand_slug === '') {
+            return new WP_Error('missing_brand_slug', 'brand_slug is required', array('status' => 400));
+        }
+
+        $brand_taxonomy = dms_admin_product_brand_taxonomy_v2();
+        if ($brand_taxonomy === '' || !taxonomy_exists($brand_taxonomy)) {
+            return new WP_Error('brand_taxonomy_missing', 'Brand taxonomy is not available', array('status' => 404));
+        }
+
+        $term = get_term_by('slug', $brand_slug, $brand_taxonomy);
+        if (!$term || is_wp_error($term)) {
+            return new WP_Error('brand_not_found', 'Brand was not found', array('status' => 404));
+        }
+
+        $meta_keys = function_exists('dms_ecom_brand_image_meta_keys')
+            ? dms_ecom_brand_image_meta_keys()
+            : array('thumbnail_id', 'brand_logo_id', 'brand_image_id', 'brand_logo', 'brand_image', 'image', 'logo', 'icon');
+        $all_meta = get_term_meta($term->term_id);
+        $meta = array();
+        foreach ($meta_keys as $key) {
+            if (!array_key_exists($key, $all_meta)) {
+                continue;
+            }
+            $values = array();
+            foreach ((array) $all_meta[$key] as $value) {
+                if (is_scalar($value) || $value === null) {
+                    $values[] = (string) $value;
+                } else {
+                    $values[] = $value;
+                }
+            }
+            $meta[$key] = $values;
+        }
+
+        return dms_admin_detail_response(array(
+            'brand' => array(
+                'id' => (int) $term->term_id,
+                'name' => (string) $term->name,
+                'slug' => (string) $term->slug,
+                'taxonomy' => (string) $brand_taxonomy,
+            ),
+            'image_url' => function_exists('dms_ecom_resolve_brand_image_url') ? dms_ecom_resolve_brand_image_url($term) : '',
+            'meta_keys_checked' => array_values($meta_keys),
+            'meta' => $meta,
+        ));
     }
 }
 
@@ -2300,19 +2494,58 @@ if (!function_exists('dms_admin_update_review_status_v2')) {
 
 if (!function_exists('dms_admin_get_home_banner_v2')) {
     function dms_admin_get_home_banner_v2(WP_REST_Request $request) {
-        return dms_admin_detail_response(function_exists('dms_app_home_banner_admin_payload') ? dms_app_home_banner_admin_payload() : array());
+        $canonical = function_exists('dms_app_home_banners_get')
+            ? dms_app_home_banners_get()
+            : array('items' => array());
+        return dms_admin_detail_response(
+            !empty($canonical['items'][0]) && is_array($canonical['items'][0])
+                ? $canonical['items'][0]
+                : array('enabled' => false)
+        );
     }
 }
 
 if (!function_exists('dms_admin_save_home_banner_v2')) {
     function dms_admin_save_home_banner_v2(WP_REST_Request $request) {
         $body = dms_admin_request_body_v2($request);
-        if (isset($body['product_ids']) && is_array($body['product_ids'])) {
-            $body['product_ids'] = implode(',', array_map('intval', $body['product_ids']));
+        $canonical = function_exists('dms_app_home_banners_get')
+            ? dms_app_home_banners_get()
+            : array('items' => array());
+        $items = isset($canonical['items']) && is_array($canonical['items'])
+            ? $canonical['items']
+            : array();
+        $body['id'] = sanitize_text_field((string) ($body['id'] ?? ($items[0]['id'] ?? 'legacy-home-banner')));
+        $body['sort_order'] = intval($body['sort_order'] ?? ($items[0]['sort_order'] ?? 0));
+        if (empty($items)) {
+            $items[] = $body;
+        } else {
+            $items[0] = array_merge($items[0], $body);
         }
-        $saved = function_exists('dms_app_home_banner_save') ? dms_app_home_banner_save($body) : array();
-        $payload = function_exists('dms_app_home_banner_admin_payload') ? dms_app_home_banner_admin_payload() : $saved;
+        $saved = function_exists('dms_app_home_banners_save')
+            ? dms_app_home_banners_save(array('items' => $items))
+            : array('items' => array());
+        $payload = !empty($saved['items'][0]) ? $saved['items'][0] : array('enabled' => false);
         return dms_admin_action_response('تم حفظ بانر الرئيسية بنجاح.', array('banner' => $payload));
+    }
+}
+
+if (!function_exists('dms_admin_get_home_banners_v2')) {
+    function dms_admin_get_home_banners_v2(WP_REST_Request $request) {
+        return dms_admin_detail_response(
+            function_exists('dms_app_home_banners_get') ? dms_app_home_banners_get() : array('items' => array())
+        );
+    }
+}
+
+if (!function_exists('dms_admin_save_home_banners_v2')) {
+    function dms_admin_save_home_banners_v2(WP_REST_Request $request) {
+        $saved = function_exists('dms_app_home_banners_save')
+            ? dms_app_home_banners_save(dms_admin_request_body_v2($request))
+            : array('items' => array());
+        return dms_admin_action_response(
+            'Home banners saved successfully.',
+            array('banners' => $saved)
+        );
     }
 }
 
@@ -2370,6 +2603,9 @@ if (!function_exists('dms_admin_ordering_term_list_v2')) {
         $terms = get_terms(array(
             'taxonomy' => $taxonomy,
             'hide_empty' => false,
+            'orderby' => 'menu_order',
+            'order' => 'ASC',
+            'update_term_meta_cache' => true,
         ));
 
         $items = array();
@@ -2385,8 +2621,8 @@ if (!function_exists('dms_admin_ordering_term_list_v2')) {
 if (!function_exists('dms_admin_ordering_products_v2')) {
     function dms_admin_ordering_products_v2() {
         $products = wc_get_products(array(
-            'limit' => 200,
-            'status' => array('publish', 'draft', 'pending', 'private'),
+            'limit' => -1,
+            'status' => array('publish'),
             'orderby' => 'title',
             'order' => 'ASC',
         ));
@@ -2407,12 +2643,16 @@ if (!function_exists('dms_admin_ordering_products_v2')) {
 if (!function_exists('dms_admin_get_ordering_config_v2')) {
     function dms_admin_get_ordering_config_v2(WP_REST_Request $request) {
         $config = function_exists('lpco_app_layout_config_get') ? lpco_app_layout_config_get() : array();
+        $products = dms_admin_ordering_products_v2();
         return dms_admin_detail_response(array(
             'config' => $config,
             'available' => array(
                 'categories' => dms_admin_ordering_term_list_v2('product_cat'),
                 'brands' => dms_admin_ordering_term_list_v2(dms_admin_product_brand_taxonomy_v2()),
-                'featured_products' => dms_admin_ordering_products_v2(),
+                'products' => $products,
+                'slider_products' => $products,
+                'featured_products' => $products,
+                'latest_products' => $products,
             ),
         ));
     }
@@ -2426,7 +2666,10 @@ if (!function_exists('dms_admin_save_ordering_config_v2')) {
             'brands' => dms_admin_parse_id_list($body['brands'] ?? array()),
             'hidden_categories' => dms_admin_parse_id_list($body['hidden_categories'] ?? array()),
             'hidden_brands' => dms_admin_parse_id_list($body['hidden_brands'] ?? array()),
+            'slider_products' => dms_admin_parse_id_list($body['slider_products'] ?? array()),
             'featured_products' => dms_admin_parse_id_list($body['featured_products'] ?? $body['products'] ?? array()),
+            'latest_products' => dms_admin_parse_id_list($body['latest_products'] ?? array()),
+            'latest_mode' => ($body['latest_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto',
         );
         $saved = function_exists('lpco_app_layout_config_save') ? lpco_app_layout_config_save($input) : $input;
         return dms_admin_action_response('تم حفظ ترتيب الواجهة بنجاح.', array('ordering' => $saved));

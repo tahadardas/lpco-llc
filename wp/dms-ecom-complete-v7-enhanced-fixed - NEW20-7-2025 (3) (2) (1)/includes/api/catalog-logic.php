@@ -70,6 +70,7 @@ function dms_ecom_get_app_order_meta_key($brand_slug = '') {
                 return dms_app_order_meta_key($term->term_id);
             }
         }
+        return '';
     }
     $enabled = get_option(dms_app_order_enabled_key(0));
     if ($enabled) {
@@ -299,10 +300,20 @@ function dms_ecom_build_product_images_payload($product) {
         $src = trim($src);
         if ($src === '') return;
 
+        $thumbnail_src = '';
+        if (function_exists('wp_get_attachment_image_url')) {
+            $thumbnail_src = (string) wp_get_attachment_image_url($image_id, 'medium_large');
+            if (trim($thumbnail_src) === '') {
+                $thumbnail_src = (string) wp_get_attachment_image_url($image_id, 'woocommerce_thumbnail');
+            }
+        }
+        $thumbnail_src = trim($thumbnail_src);
+
         $seen[$image_id] = true;
         $images[] = array(
             'id' => $image_id,
             'src' => $src,
+            'thumbnail_src' => $thumbnail_src !== '' ? $thumbnail_src : $src,
             'name' => function_exists('dms_ecom_get_attachment_title_cached') ? dms_ecom_get_attachment_title_cached($image_id) : '',
             'alt' => function_exists('dms_ecom_get_attachment_alt_cached') ? dms_ecom_get_attachment_alt_cached($image_id) : '',
         );
@@ -384,11 +395,11 @@ function dms_ecom_resolve_unit_presentation($dms_prices, $active_group = 'defaul
 
     $piece_name = function_exists('sanitize_text_field') ? sanitize_text_field($default_bucket['box_unit_name'] ?? '') : ($default_bucket['box_unit_name'] ?? '');
     if ($piece_name === '') $piece_name = function_exists('sanitize_text_field') ? sanitize_text_field($active_bucket['box_unit_name'] ?? '') : ($active_bucket['box_unit_name'] ?? '');
-    if ($piece_name === '') $piece_name = 'Ù‚Ø·Ø¹Ø©';
+    if ($piece_name === '') $piece_name = 'قطعة';
 
     $package_name = function_exists('sanitize_text_field') ? sanitize_text_field($default_bucket['package_unit_name'] ?? '') : ($default_bucket['package_unit_name'] ?? '');
     if ($package_name === '') $package_name = function_exists('sanitize_text_field') ? sanitize_text_field($active_bucket['package_unit_name'] ?? '') : ($active_bucket['package_unit_name'] ?? '');
-    if ($package_name === '') $package_name = 'Ø·Ø±Ø¯';
+    if ($package_name === '') $package_name = 'طرد';
 
     $piece_pieces = absint($default_bucket['box_pieces_count'] ?? 0);
     if ($piece_pieces <= 0) $piece_pieces = absint($active_bucket['box_pieces_count'] ?? 0);
@@ -557,8 +568,10 @@ function dms_ecom_prime_product_query_context($query, $has_brand_taxonomy, $extr
             update_meta_cache('term', array_values($term_ids));
         }
         foreach ($term_ids as $tid) {
-            foreach (array('thumbnail_id', 'brand_logo_id', 'brand_image_id') as $mk) {
-                $aid = absint(dms_ecom_get_term_meta_value($tid, $mk));
+            $brand_attachment_ids = function_exists('dms_ecom_collect_brand_image_attachment_ids')
+                ? dms_ecom_collect_brand_image_attachment_ids($tid)
+                : array();
+            foreach ($brand_attachment_ids as $aid) {
                 if ($aid > 0) $attachment_ids[$aid] = $aid;
             }
         }
@@ -570,6 +583,9 @@ function dms_ecom_prime_product_query_context($query, $has_brand_taxonomy, $extr
 
 if (!function_exists('dms_ecom_get_product_order_value')) {
 function dms_ecom_get_product_order_value($product_id, $product_meta = array(), $order_meta_key = '_custom_product_order') {
+    if (!is_string($order_meta_key) || $order_meta_key === '') {
+        return function_exists('get_post_field') ? intval(get_post_field('menu_order', $product_id)) : 0;
+    }
     $order_meta_key = is_string($order_meta_key) && $order_meta_key !== '' ? $order_meta_key : '_custom_product_order';
     $custom_order = array_key_exists($order_meta_key, $product_meta) ? $product_meta[$order_meta_key] : (function_exists('get_post_meta') ? get_post_meta($product_id, $order_meta_key, true) : '');
     if (($custom_order === '' || $custom_order === null) && $order_meta_key !== '_custom_product_order') {
@@ -585,29 +601,57 @@ function dms_get_products_with_prices($request) {
     $per_page = is_object($request) && method_exists($request, 'get_param') ? ($request->get_param('per_page') ?: 100) : 100;
     $page = is_object($request) && method_exists($request, 'get_param') ? ($request->get_param('page') ?: 1) : 1;
     $category = is_object($request) && method_exists($request, 'get_param') ? $request->get_param('category') : null;
+    if (($category === null || $category === '') && is_object($request) && method_exists($request, 'get_param')) {
+        $category = $request->get_param('category_id');
+    }
     $search = is_object($request) && method_exists($request, 'get_param') ? $request->get_param('search') : null;
     $brand_slug = is_object($request) && method_exists($request, 'get_param') ? $request->get_param('brand_slug') : null;
+    if (($brand_slug === null || $brand_slug === '') && is_object($request) && method_exists($request, 'get_param')) {
+        $brand_slug = $request->get_param('brand');
+    }
     $include = is_object($request) && method_exists($request, 'get_param') ? $request->get_param('include') : null;
     $include_ids = !empty($include) ? array_values(array_filter(array_map('absint', explode(',', (string) $include)))) : array();
     $stock_order = is_object($request) && method_exists($request, 'get_param') ? $request->get_param('stock_order') : null;
     $latest_days = is_object($request) && method_exists($request, 'get_param') ? absint($request->get_param('latest_days')) : 0;
     $stock_status = is_object($request) && method_exists($request, 'get_param') && $request->get_param('stock') !== null ? (function_exists('sanitize_text_field') ? sanitize_text_field($request->get_param('stock')) : $request->get_param('stock')) : '';
     $is_guest = function_exists('lpco_dms_is_guest_request') ? lpco_dms_is_guest_request($request) : true;
+    $force_refresh = is_object($request) && method_exists($request, 'get_param')
+        ? dms_ecom_truthy_param($request->get_param('force_refresh'))
+        : false;
     list($current_user_id, $current_group, $current_currency) = dms_ecom_get_request_user_context($request, $is_guest);
     
     $cache_key = $is_guest ? (function_exists('lpco_dms_guest_cache_key') ? lpco_dms_guest_cache_key('products', $request) : '') : (function_exists('lpco_dms_auth_cache_key') ? lpco_dms_auth_cache_key('products', $request, $current_user_id, $current_group, $current_currency) : '');
-    $cached = $is_guest ? (function_exists('lpco_dms_guest_cache_get') ? lpco_dms_guest_cache_get($cache_key) : false) : (function_exists('lpco_dms_auth_cache_get') ? lpco_dms_auth_cache_get($cache_key) : false);
+    $cached = !$force_refresh
+        ? ($is_guest ? (function_exists('lpco_dms_guest_cache_get') ? lpco_dms_guest_cache_get($cache_key) : false) : (function_exists('lpco_dms_auth_cache_get') ? lpco_dms_auth_cache_get($cache_key) : false))
+        : false;
     if ($cached !== false) {
         if ($is_guest && function_exists('dms_send_cache_headers') && function_exists('wp_json_encode')) dms_send_cache_headers('products_guest_' . md5(wp_json_encode($cached)));
         return $cached;
     }
     
     $has_brand_taxonomy = function_exists('taxonomy_exists') ? taxonomy_exists('product_brand') : false;
-    $args = function_exists('dms_build_ordered_product_query_args') ? dms_build_ordered_product_query_args(array('posts_per_page' => $per_page, 'paged' => $page, 'stock_status' => $stock_status)) : array();
+    $order_meta_key = dms_ecom_get_app_order_meta_key($brand_slug);
+    if ($brand_slug && !$order_meta_key && function_exists('dms_apply_woocommerce_product_menu_order_args')) {
+        $args = array(
+            'post_type' => 'product',
+            'post_status' => 'publish',
+            'posts_per_page' => $per_page,
+            'paged' => $page,
+        );
+        if (!empty($stock_status) && $stock_status !== 'all') {
+            $args['meta_query']['stock_status'] = array(
+                'key' => '_stock_status',
+                'value' => $stock_status,
+                'compare' => '=',
+            );
+        }
+        $args = dms_apply_woocommerce_product_menu_order_args($args);
+    } else {
+        $args = function_exists('dms_build_ordered_product_query_args') ? dms_build_ordered_product_query_args(array('posts_per_page' => $per_page, 'paged' => $page, 'stock_status' => $stock_status)) : array();
+    }
     $args['no_found_rows'] = true;
     $args['update_post_meta_cache'] = true;
     $args['update_post_term_cache'] = true;
-    $order_meta_key = dms_ecom_get_app_order_meta_key($brand_slug);
     if ($order_meta_key && function_exists('dms_apply_product_ordering_args')) {
         $args = dms_apply_product_ordering_args($args, $order_meta_key);
     }
@@ -685,6 +729,20 @@ function dms_get_products_with_prices($request) {
             $global_order_value = dms_ecom_get_product_order_value($product_id, $product_meta, '_custom_product_order');
             $image_id = method_exists($product, 'get_image_id') ? $product->get_image_id() : 0;
             $image_url = $image_id ? dms_ecom_get_attachment_url_cached($image_id) : '';
+            $thumbnail_url = '';
+            if ($image_id && function_exists('wp_get_attachment_image_url')) {
+                $thumbnail_url = (string) wp_get_attachment_image_url($image_id, 'medium_large');
+                if (trim($thumbnail_url) === '') {
+                    $thumbnail_url = (string) wp_get_attachment_image_url($image_id, 'woocommerce_thumbnail');
+                }
+            }
+            $thumbnail_url = trim($thumbnail_url);
+            $images_payload = function_exists('dms_ecom_build_product_images_payload')
+                ? dms_ecom_build_product_images_payload($product)
+                : ($image_id ? array(array('id' => $image_id, 'src' => $image_url, 'thumbnail_src' => $thumbnail_url !== '' ? $thumbnail_url : $image_url)) : array());
+            if ($image_url === '' && !empty($images_payload[0]['src'])) {
+                $image_url = (string) $images_payload[0]['src'];
+            }
             $brand_slug_value = ''; $brand_terms = $prepared['brands'][$product_id] ?? array();
             if (!empty($brand_terms)) $brand_slug_value = $brand_terms[0]->slug;
             $created_ts = dms_ecom_get_product_created_ts($product_id, $product);
@@ -694,9 +752,9 @@ function dms_get_products_with_prices($request) {
             $barcode_payload = dms_ecom_get_product_barcode_payload($product_id, $product_meta);
  
             $product_data = array(
-                'id' => $product_id, 'name' => method_exists($product, 'get_name') ? $product->get_name() : '', 'slug' => method_exists($product, 'get_slug') ? $product->get_slug() : '', 'permalink' => function_exists('get_permalink') ? get_permalink($product_id) : '', 'type' => method_exists($product, 'get_type') ? $product->get_type() : '', 'status' => method_exists($product, 'get_status') ? $product->get_status() : '', 'description' => method_exists($product, 'get_description') ? $product->get_description() : '', 'short_description' => method_exists($product, 'get_short_description') ? $product->get_short_description() : '', 'sku' => method_exists($product, 'get_sku') ? $product->get_sku() : '', 'price' => method_exists($product, 'get_price') ? $product->get_price() : '', 'regular_price' => method_exists($product, 'get_regular_price') ? $product->get_regular_price() : '', 'sale_price' => method_exists($product, 'get_sale_price') ? $product->get_sale_price() : '', 'custom_order' => $custom_order_value, 'app_order' => $custom_order_value, 'brand_order' => $brand_slug ? $custom_order_value : $global_order_value, 'stock_status' => (method_exists($product, 'get_stock_status') ? $product->get_stock_status() : 'outofstock') ?: 'outofstock', 'stock_quantity' => method_exists($product, 'get_stock_quantity') ? $product->get_stock_quantity() : 0, 'image_url' => $image_url, 'brand_slug' => $brand_slug_value, 'is_new' => $is_new, 'new_badge_label_ar' => 'Ø­Ø¯ÙŠØ«', 'new_badge_days' => defined('DMS_NEW_DAYS') ? DMS_NEW_DAYS : 30, 'created_at_gmt' => $created_ts ? gmdate('c', $created_ts) : null, 'published_at_gmt' => $published_gmt ? gmdate('c', strtotime($published_gmt)) : null, 'published_at_local' => $published_local ? date('c', strtotime($published_local)) : null,
+                'id' => $product_id, 'name' => method_exists($product, 'get_name') ? $product->get_name() : '', 'slug' => method_exists($product, 'get_slug') ? $product->get_slug() : '', 'permalink' => function_exists('get_permalink') ? get_permalink($product_id) : '', 'type' => method_exists($product, 'get_type') ? $product->get_type() : '', 'status' => method_exists($product, 'get_status') ? $product->get_status() : '', 'description' => method_exists($product, 'get_description') ? $product->get_description() : '', 'short_description' => method_exists($product, 'get_short_description') ? $product->get_short_description() : '', 'sku' => method_exists($product, 'get_sku') ? $product->get_sku() : '', 'price' => method_exists($product, 'get_price') ? $product->get_price() : '', 'regular_price' => method_exists($product, 'get_regular_price') ? $product->get_regular_price() : '', 'sale_price' => method_exists($product, 'get_sale_price') ? $product->get_sale_price() : '', 'menu_order' => function_exists('get_post_field') ? intval(get_post_field('menu_order', $product_id)) : 0, 'custom_order' => $custom_order_value, 'app_order' => $custom_order_value, 'brand_order' => $brand_slug ? $custom_order_value : $global_order_value, 'stock_status' => (method_exists($product, 'get_stock_status') ? $product->get_stock_status() : 'outofstock') ?: 'outofstock', 'stock_quantity' => method_exists($product, 'get_stock_quantity') ? $product->get_stock_quantity() : 0, 'image_url' => $image_url, 'brand_slug' => $brand_slug_value, 'is_new' => $is_new, 'new_badge_label_ar' => 'حديث', 'new_badge_days' => defined('DMS_NEW_DAYS') ? DMS_NEW_DAYS : 30, 'created_at_gmt' => $created_ts ? gmdate('c', $created_ts) : null, 'published_at_gmt' => $published_gmt ? gmdate('c', strtotime($published_gmt)) : null, 'published_at_local' => $published_local ? date('c', strtotime($published_local)) : null,
                 'categories' => array_map(function($term) { return array('id' => $term->term_id, 'name' => $term->name, 'slug' => $term->slug); }, $category_terms ?: array()),
-                'images' => method_exists($product, 'get_gallery_image_ids') ? array_map(function($image_id) { return array('id' => $image_id, 'src' => dms_ecom_get_attachment_url_cached($image_id), 'name' => dms_ecom_get_attachment_title_cached($image_id), 'alt' => dms_ecom_get_attachment_alt_cached($image_id)); }, $product->get_gallery_image_ids()) : array(),
+                'images' => $images_payload,
                 'unit_options' => $unit_options, 'unit_display_default_ar' => $unit_display_default_ar, 'unit_display_default_en' => $unit_display_default_en,
                 'meta_data' => array(array('key' => '_dms_prices', 'value' => $dms_prices ?: array()))
             );
@@ -708,13 +766,11 @@ function dms_get_products_with_prices($request) {
             foreach (dms_ecom_catalog_barcode_meta_keys() as $index => $barcode_meta_key) {
                 $product_data['meta_data'][] = array('key' => $barcode_meta_key, 'value' => $barcode_payload['barcode_' . ($index + 1)] ?? '');
             }
-            
-            if ($image_id) array_unshift($product_data['images'], array('id' => $image_id, 'src' => dms_ecom_get_attachment_url_cached($image_id), 'name' => dms_ecom_get_attachment_title_cached($image_id), 'alt' => dms_ecom_get_attachment_alt_cached($image_id)));
             $products[] = $product_data;
         }
     }
     if (function_exists('wp_reset_postdata')) wp_reset_postdata();
-    if ($is_guest && $cache_key) { if (function_exists('lpco_dms_guest_cache_set')) lpco_dms_guest_cache_set($cache_key, $products); if (function_exists('dms_send_cache_headers') && function_exists('wp_json_encode')) dms_send_cache_headers('products_guest_' . md5(wp_json_encode($products))); } elseif ($cache_key) { if (function_exists('lpco_dms_auth_cache_set')) lpco_dms_auth_cache_set($cache_key, $products); }
+    if (!$force_refresh && $is_guest && $cache_key) { if (function_exists('lpco_dms_guest_cache_set')) lpco_dms_guest_cache_set($cache_key, $products); if (function_exists('dms_send_cache_headers') && function_exists('wp_json_encode')) dms_send_cache_headers('products_guest_' . md5(wp_json_encode($products))); } elseif (!$force_refresh && $cache_key) { if (function_exists('lpco_dms_auth_cache_set')) lpco_dms_auth_cache_set($cache_key, $products); }
     return $products;
 }
 }
@@ -723,7 +779,7 @@ if (!function_exists('dms_ecom_is_color_attribute_key')) {
 function dms_ecom_is_color_attribute_key($key) {
     if (!is_string($key) || $key === '') return false;
     $normalized = strtolower($key);
-    return strpos((string)$normalized, 'color') !== false || strpos((string)$normalized, 'colour') !== false || strpos((string)$key, 'Ù„ÙˆÙ†') !== false;
+    return strpos((string)$normalized, 'color') !== false || strpos((string)$normalized, 'colour') !== false || strpos((string)$key, 'لون') !== false;
 }
 }
 
@@ -856,17 +912,26 @@ function dms_ecom_filter_products_plus_response($products, $request) {
 
     $sku = is_object($request) && method_exists($request, 'get_param') ? strtolower(trim((string) $request->get_param('sku'))) : '';
     $barcode = is_object($request) && method_exists($request, 'get_param') ? strtolower(trim((string) $request->get_param('barcode'))) : '';
+    $exact_barcode = is_object($request) && method_exists($request, 'get_param') ? intval($request->get_param('exact_barcode')) === 1 : false;
     if ($sku !== '' || $barcode !== '') {
-        $filtered = array_values(array_filter($filtered, function ($product) use ($sku, $barcode) {
+        $filtered = array_values(array_filter($filtered, function ($product) use ($sku, $barcode, $exact_barcode) {
             $product_sku = strtolower(trim((string) ($product['sku'] ?? '')));
             if ($sku !== '' && $product_sku !== '' && strpos($product_sku, $sku) !== false) return true;
             if ($barcode !== '') {
-                if ($product_sku !== '' && strpos($product_sku, $barcode) !== false) return true;
+                if ($product_sku !== '' && dms_ecom_catalog_barcode_value_matches($product_sku, $barcode, $exact_barcode)) return true;
+                foreach ((array) ($product['barcodes'] ?? array()) as $value) {
+                    $value = strtolower(trim((string) $value));
+                    if ($value !== '' && dms_ecom_catalog_barcode_value_matches($value, $barcode, $exact_barcode)) return true;
+                }
+                foreach (array('barcode_1', 'barcode_2', 'barcode_3', 'barcode_4', 'barcode', 'ean', 'upc') as $field) {
+                    $value = strtolower(trim((string) ($product[$field] ?? '')));
+                    if ($value !== '' && dms_ecom_catalog_barcode_value_matches($value, $barcode, $exact_barcode)) return true;
+                }
                 foreach ((array) ($product['meta_data'] ?? array()) as $meta) {
                     $key = strtolower((string) ($meta['key'] ?? ''));
-                    if ($key === '' || (strpos($key, 'barcode') === false && strpos($key, 'sku') === false && strpos($key, 'code') === false)) continue;
+                    if ($key === '' || (strpos($key, 'barcode') === false && strpos($key, 'sku') === false && strpos($key, 'code') === false && $key !== 'ean' && $key !== 'upc')) continue;
                     $value = strtolower(trim((string) ($meta['value'] ?? '')));
-                    if ($value !== '' && strpos($value, $barcode) !== false) return true;
+                    if ($value !== '' && dms_ecom_catalog_barcode_value_matches($value, $barcode, $exact_barcode)) return true;
                 }
             }
             return false;
@@ -874,6 +939,86 @@ function dms_ecom_filter_products_plus_response($products, $request) {
     }
 
     return $filtered;
+}
+
+function dms_ecom_catalog_barcode_value_matches($stored, $scanned, $exact) {
+    $stored = strtolower(trim((string) $stored));
+    $scanned = strtolower(trim((string) $scanned));
+    if ($stored === '' || $scanned === '') return false;
+
+    if (!$exact) {
+        return strpos($stored, $scanned) !== false;
+    }
+
+    $stored_candidates = dms_ecom_catalog_barcode_match_candidates($stored);
+    $scanned_candidates = dms_ecom_catalog_barcode_match_candidates($scanned);
+    return count(array_intersect($stored_candidates, $scanned_candidates)) > 0;
+}
+
+function dms_ecom_catalog_barcode_match_candidates($value) {
+    $canonical = strtolower(trim((string) $value));
+    $compact = preg_replace('/[^a-z0-9]/', '', $canonical);
+    $candidates = array_filter(array_unique(array($canonical, $compact)));
+
+    if ($compact !== '' && strlen($compact) === 13 && strpos($compact, '0') === 0) {
+        $candidates[] = substr($compact, 1);
+    }
+    if ($compact !== '' && strlen($compact) === 12) {
+        $candidates[] = '0' . $compact;
+    }
+
+    return array_values(array_unique(array_filter($candidates, function ($candidate) {
+        return $candidate !== '';
+    })));
+}
+
+function dms_ecom_find_product_ids_by_exact_barcode($barcode, $limit = 25) {
+    global $wpdb;
+    $barcode = strtolower(trim((string) $barcode));
+    if ($barcode === '' || !isset($wpdb) || !is_object($wpdb)) return array();
+
+    $limit = max(1, absint($limit));
+    $ids = array();
+    $meta_keys = dms_ecom_catalog_exact_barcode_meta_keys();
+    $meta_placeholders = implode(',', array_fill(0, count($meta_keys), '%s'));
+    $candidates = dms_ecom_catalog_barcode_match_candidates($barcode);
+    $value_placeholders = implode(',', array_fill(0, count($candidates), '%s'));
+
+    $sql = $wpdb->prepare(
+        "SELECT DISTINCT p.ID
+         FROM {$wpdb->posts} p
+         INNER JOIN {$wpdb->postmeta} pm
+            ON pm.post_id = p.ID
+            AND pm.meta_key IN ($meta_placeholders)
+         WHERE p.post_type = 'product'
+            AND p.post_status = 'publish'
+            AND (
+                LOWER(TRIM(pm.meta_value)) IN ($value_placeholders)
+                OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(pm.meta_value), ' ', ''), '-', ''), '.', ''), '/', '')) IN ($value_placeholders)
+            )
+         ORDER BY CASE WHEN pm.meta_key = '_sku' THEN 0 ELSE 1 END, p.menu_order ASC, p.ID DESC
+         LIMIT %d",
+        array_merge($meta_keys, $candidates, $candidates, array($limit))
+    );
+    if ($sql) {
+        dms_ecom_append_unique_product_ids($ids, $wpdb->get_col($sql), $limit);
+    }
+
+    if (count($ids) < $limit && function_exists('wc_get_product_id_by_sku')) {
+        foreach ($candidates as $candidate) {
+            $sku_product_id = absint(wc_get_product_id_by_sku($candidate));
+            if ($sku_product_id > 0 && get_post_type($sku_product_id) === 'product' && get_post_status($sku_product_id) === 'publish') {
+                dms_ecom_append_unique_product_ids($ids, array($sku_product_id), $limit);
+            }
+            if (count($ids) >= $limit) break;
+        }
+    }
+
+    if (count($ids) > 1 && function_exists('error_log')) {
+        error_log('DMS duplicate exact barcode "' . $barcode . '" matched products: ' . implode(',', $ids));
+    }
+
+    return $ids;
 }
 
 function dms_ecom_sort_products_plus_response($products, $request) {
@@ -1058,7 +1203,15 @@ function dms_ecom_catalog_search_meta_keys() {
     return array_values(array_unique(array_merge(
         array('_sku'),
         dms_ecom_catalog_barcode_meta_keys(),
-        array('_global_unique_id', 'barcode', '_barcode', 'dms_barcode', '_dms_barcode', 'product_barcode')
+        array('_global_unique_id', 'barcode', '_barcode', 'ean', 'upc', 'dms_barcode', '_dms_barcode', 'product_barcode')
+    )));
+}
+
+function dms_ecom_catalog_exact_barcode_meta_keys() {
+    return array_values(array_unique(array_merge(
+        array('_sku'),
+        dms_ecom_catalog_barcode_meta_keys(),
+        array('barcode', '_barcode', 'ean', 'upc', 'dms_barcode', '_dms_barcode', 'product_barcode')
     )));
 }
 
@@ -1276,6 +1429,31 @@ function dms_get_product_diagnostics($request) {
     );
 }
 
+function dms_get_product_by_barcode($request) {
+    if (!class_exists('WP_REST_Request')) {
+        return array();
+    }
+    $barcode = is_object($request) && method_exists($request, 'get_param')
+        ? sanitize_text_field((string) $request->get_param('barcode'))
+        : '';
+    $proxy = new WP_REST_Request('GET', '/dms/v1/products-plus');
+    $proxy->set_param('barcode', $barcode);
+    $proxy->set_param('exact_barcode', 1);
+    $proxy->set_param('force_refresh', 1);
+    $proxy->set_param('envelope', 1);
+    $proxy->set_param('include_gallery', 1);
+    $proxy->set_param('per_page', 5);
+    if (is_object($request) && method_exists($request, 'get_param')) {
+        foreach (array('guest', 'group', 'currency', 'pricing_rev') as $param) {
+            $value = $request->get_param($param);
+            if ($value !== null && $value !== '') {
+                $proxy->set_param($param, $value);
+            }
+        }
+    }
+    return dms_get_products_plus($proxy);
+}
+
 function dms_get_products_plus($request) {
     if (!function_exists('absint')) return array();
     $per_page = is_object($request) && method_exists($request, 'get_param') ? intval($request->get_param('per_page') ?: 100) : 100;
@@ -1286,6 +1464,9 @@ function dms_get_products_plus($request) {
     $search = is_object($request) && method_exists($request, 'get_param') ? sanitize_text_field((string) $request->get_param('search')) : '';
     $slug = is_object($request) && method_exists($request, 'get_param') ? sanitize_title((string) $request->get_param('slug')) : '';
     $brand_slug = is_object($request) && method_exists($request, 'get_param') ? sanitize_title((string) $request->get_param('brand_slug')) : '';
+    if ($brand_slug === '' && is_object($request) && method_exists($request, 'get_param')) {
+        $brand_slug = sanitize_title((string) $request->get_param('brand'));
+    }
     $stock_order = is_object($request) && method_exists($request, 'get_param') ? $request->get_param('stock_order') : null; 
     $latest_days = is_object($request) && method_exists($request, 'get_param') ? absint($request->get_param('latest_days')) : 0; 
     $stock_status = '';
@@ -1296,6 +1477,19 @@ function dms_get_products_plus($request) {
     }
     $include = is_object($request) && method_exists($request, 'get_param') ? $request->get_param('include') : null;
     $include_ids = function_exists('dms_ecom_parse_id_list_param') ? dms_ecom_parse_id_list_param($include) : array();
+    $barcode = is_object($request) && method_exists($request, 'get_param') ? sanitize_text_field((string) $request->get_param('barcode')) : '';
+    $exact_barcode = is_object($request) && method_exists($request, 'get_param') ? dms_ecom_truthy_param($request->get_param('exact_barcode')) : false;
+    $barcode_match_ids = array();
+    $barcode_duplicate_warning = '';
+    if ($barcode !== '' && $exact_barcode && function_exists('dms_ecom_find_product_ids_by_exact_barcode')) {
+        $barcode_match_ids = dms_ecom_find_product_ids_by_exact_barcode($barcode, 25);
+        if (count($barcode_match_ids) > 1) {
+            $barcode_duplicate_warning = 'duplicate_exact_barcode_matches';
+        }
+        $include_ids = $barcode_match_ids;
+        $per_page = max(1, count($include_ids));
+        $page = 1;
+    }
     $include_gallery = is_object($request) && method_exists($request, 'get_param')
         ? (dms_ecom_truthy_param($request->get_param('include_gallery')) || dms_ecom_truthy_param($request->get_param('gallery')))
         : false;
@@ -1303,10 +1497,15 @@ function dms_get_products_plus($request) {
     $orderby = is_object($request) && method_exists($request, 'get_param') ? strtolower(trim((string) $request->get_param('orderby'))) : '';
     $order = is_object($request) && method_exists($request, 'get_param') ? strtoupper(trim((string) $request->get_param('order'))) : 'DESC';
     $is_guest = function_exists('lpco_dms_is_guest_request') ? lpco_dms_is_guest_request($request) : true;
+    $force_refresh = is_object($request) && method_exists($request, 'get_param')
+        ? dms_ecom_truthy_param($request->get_param('force_refresh'))
+        : false;
     list($current_user_id, $current_group, $current_currency) = dms_ecom_get_request_user_context($request, $is_guest);
     
     $cache_key = $is_guest ? (function_exists('lpco_dms_guest_cache_key') ? lpco_dms_guest_cache_key('products_plus', $request) : '') : (function_exists('lpco_dms_auth_cache_key') ? lpco_dms_auth_cache_key('products_plus', $request, $current_user_id, $current_group, $current_currency) : '');
-    $cached = $is_guest ? (function_exists('lpco_dms_guest_cache_get') ? lpco_dms_guest_cache_get($cache_key) : false) : (function_exists('lpco_dms_auth_cache_get') ? lpco_dms_auth_cache_get($cache_key) : false);
+    $cached = (!$force_refresh && !($barcode !== '' && $exact_barcode))
+        ? ($is_guest ? (function_exists('lpco_dms_guest_cache_get') ? lpco_dms_guest_cache_get($cache_key) : false) : (function_exists('lpco_dms_auth_cache_get') ? lpco_dms_auth_cache_get($cache_key) : false))
+        : false;
     if ($cached !== false) {
         if ($is_guest && function_exists('dms_send_cache_headers') && function_exists('wp_json_encode')) dms_send_cache_headers('products_plus_guest_' . md5(wp_json_encode($cached)));
         return $cached;
@@ -1314,6 +1513,12 @@ function dms_get_products_plus($request) {
     
     $has_brand_taxonomy = function_exists('taxonomy_exists') ? taxonomy_exists('product_brand') : false;
     $order_meta_key = dms_ecom_get_app_order_meta_key($brand_slug);
+
+    if ($barcode !== '' && $exact_barcode && empty($include_ids)) {
+        $meta = dms_ecom_products_plus_meta(null, 1, $per_page, 0);
+        $meta['barcode_lookup'] = array('exact' => true, 'matched_ids' => array());
+        return dms_ecom_products_plus_response(array(), $request, $meta);
+    }
 
     if (!empty($include_ids)) {
         $per_page = count($include_ids);
@@ -1347,8 +1552,10 @@ function dms_get_products_plus($request) {
             );
         }
 
-        if (function_exists('dms_apply_product_ordering_args')) {
+        if ($order_meta_key && function_exists('dms_apply_product_ordering_args')) {
             $args = dms_apply_product_ordering_args($args, $order_meta_key);
+        } elseif ($brand_slug && function_exists('dms_apply_woocommerce_product_menu_order_args')) {
+            $args = dms_apply_woocommerce_product_menu_order_args($args);
         }
 
         $tax_query = array();
@@ -1467,9 +1674,20 @@ function dms_get_products_plus($request) {
             
             $image_id = method_exists($product, 'get_image_id') ? $product->get_image_id() : 0;
             $image_src = $image_id ? (function_exists('dms_ecom_get_attachment_url_cached') ? dms_ecom_get_attachment_url_cached($image_id) : '') : '';
+            $thumbnail_src = '';
+            if ($image_id && function_exists('wp_get_attachment_image_url')) {
+                $thumbnail_src = (string) wp_get_attachment_image_url($image_id, 'medium_large');
+                if (trim($thumbnail_src) === '') {
+                    $thumbnail_src = (string) wp_get_attachment_image_url($image_id, 'woocommerce_thumbnail');
+                }
+            }
+            $thumbnail_src = trim($thumbnail_src);
             $images_payload = $include_gallery && function_exists('dms_ecom_build_product_images_payload')
                 ? dms_ecom_build_product_images_payload($product)
-                : ($image_id ? array(array('id' => $image_id, 'src' => $image_src)) : array());
+                : ($image_id ? array(array('id' => $image_id, 'src' => $image_src, 'thumbnail_src' => $thumbnail_src !== '' ? $thumbnail_src : $image_src)) : array());
+            if ($image_src === '' && !empty($images_payload[0]['src'])) {
+                $image_src = (string) $images_payload[0]['src'];
+            }
             $is_featured = method_exists($product, 'is_featured') ? $product->is_featured() : (array_key_exists('_featured', $product_meta) ? $product_meta['_featured'] === 'yes' : false);
             $stock_status = (method_exists($product, 'get_stock_status') ? $product->get_stock_status() : 'outofstock') ?: 'outofstock';
             $barcode_payload = dms_ecom_get_product_barcode_payload($product_id, $product_meta);
@@ -1501,6 +1719,7 @@ function dms_get_products_plus($request) {
                 'unit_display_default_ar' => $unit_display_default_ar,
                 'unit_display_default_en' => $unit_display_default_en,
                 'is_featured' => $is_featured,
+                'menu_order' => function_exists('get_post_field') ? intval(get_post_field('menu_order', $product_id)) : 0,
                 'custom_order' => $app_order_value,
                 'app_order' => $app_order_value,
                 'brand_order' => $brand_slug ? $app_order_value : $global_order_value,
@@ -1521,8 +1740,17 @@ function dms_get_products_plus($request) {
     if (function_exists('dms_ecom_filter_products_plus_response')) $products = dms_ecom_filter_products_plus_response($products, $request);
     if (function_exists('dms_ecom_sort_products_plus_response')) $products = dms_ecom_sort_products_plus_response($products, $request);
     $meta = dms_ecom_products_plus_meta($query, $page, $per_page, count($products));
+    if ($barcode !== '' && $exact_barcode) {
+        $meta['barcode_lookup'] = array(
+            'exact' => true,
+            'matched_ids' => array_values(array_map('absint', $barcode_match_ids)),
+        );
+        if ($barcode_duplicate_warning !== '') {
+            $meta['warnings'] = array_values(array_unique(array_merge((array) ($meta['warnings'] ?? array()), array($barcode_duplicate_warning))));
+        }
+    }
     $payload = dms_ecom_products_plus_wants_envelope($request) ? array('data' => $products, 'meta' => $meta) : $products;
-    if ($is_guest && $cache_key) { if (function_exists('lpco_dms_guest_cache_set')) lpco_dms_guest_cache_set($cache_key, $payload); if (function_exists('dms_send_cache_headers') && function_exists('wp_json_encode')) dms_send_cache_headers('products_plus_guest_' . md5(wp_json_encode($payload))); } elseif ($cache_key) { if (function_exists('lpco_dms_auth_cache_set')) lpco_dms_auth_cache_set($cache_key, $payload); }
+    if (!$force_refresh && !($barcode !== '' && $exact_barcode) && $is_guest && $cache_key) { if (function_exists('lpco_dms_guest_cache_set')) lpco_dms_guest_cache_set($cache_key, $payload); if (function_exists('dms_send_cache_headers') && function_exists('wp_json_encode')) dms_send_cache_headers('products_plus_guest_' . md5(wp_json_encode($payload))); } elseif (!$force_refresh && !($barcode !== '' && $exact_barcode) && $cache_key) { if (function_exists('lpco_dms_auth_cache_set')) lpco_dms_auth_cache_set($cache_key, $payload); }
     return dms_ecom_products_plus_response($products, $request, $meta);
 }
 function dms_get_categories_base($request) {
@@ -1612,7 +1840,7 @@ function dms_home_by_category($request) {
         $resp[] = array('id' => $c['id'], 'name' => $c['name'], 'products' => $c_prods);
     }
     $payload = array('categories' => $resp);
-    if ($ckey && function_exists('lpco_dms_guest_cache_set')) {
+    if (!$force_refresh && $ckey && function_exists('lpco_dms_guest_cache_set')) {
         if ($is_guest) lpco_dms_guest_cache_set($ckey, $payload); elseif (function_exists('lpco_dms_auth_cache_set')) lpco_dms_auth_cache_set($ckey, $payload);
     }
     if (function_exists('dms_send_cache_headers') && function_exists('wp_json_encode')) dms_send_cache_headers('home_by_category_' . md5(wp_json_encode($payload)));
@@ -1620,83 +1848,219 @@ function dms_home_by_category($request) {
 }
 }
 
+if (!function_exists('dms_ecom_brand_image_meta_keys')) {
+function dms_ecom_brand_image_meta_keys() {
+    return array_values(array_unique(array(
+        'thumbnail_id',
+        'brand_logo_id',
+        'brand_image_id',
+        'brand_logo',
+        'brand_image',
+        'image',
+        'logo',
+        'logo_id',
+        'brand_thumbnail_id',
+        'product_brand_thumbnail_id',
+        'product_brand_image',
+        'product_brand_image_id',
+        'pa_brand_image',
+        'term_image',
+        'term_image_id',
+        'icon',
+        'icon_id',
+    )));
+}
+}
+
+if (!function_exists('dms_ecom_resolve_brand_image_meta_value')) {
+function dms_ecom_resolve_brand_image_meta_value($value) {
+    if (empty($value)) {
+        return '';
+    }
+
+    if (is_array($value)) {
+        foreach (array('url', 'src', 'image_url', 'logo_url', 'thumbnail_url') as $key) {
+            if (!empty($value[$key])) {
+                $resolved = dms_ecom_resolve_brand_image_meta_value($value[$key]);
+                if ($resolved !== '') {
+                    return $resolved;
+                }
+            }
+        }
+        foreach (array('id', 'ID', 'attachment_id', 'image_id', 'logo_id') as $key) {
+            if (!empty($value[$key])) {
+                $resolved = dms_ecom_resolve_brand_image_meta_value($value[$key]);
+                if ($resolved !== '') {
+                    return $resolved;
+                }
+            }
+        }
+        return '';
+    }
+
+    if (is_object($value)) {
+        return dms_ecom_resolve_brand_image_meta_value((array) $value);
+    }
+
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return '';
+    }
+
+    if (is_numeric($raw)) {
+        $attachment_id = absint($raw);
+        if ($attachment_id <= 0) {
+            return '';
+        }
+        $url = function_exists('wp_get_attachment_image_url') ? wp_get_attachment_image_url($attachment_id, 'medium') : '';
+        if (!$url && function_exists('wp_get_attachment_image_url')) {
+            $url = wp_get_attachment_image_url($attachment_id, 'full');
+        }
+        if (!$url && function_exists('dms_ecom_get_attachment_url_cached')) {
+            $url = dms_ecom_get_attachment_url_cached($attachment_id);
+        }
+        return $url ? (function_exists('esc_url_raw') ? esc_url_raw($url) : $url) : '';
+    }
+
+    if (strpos($raw, '//') === 0) {
+        $raw = 'https:' . $raw;
+    } elseif (strpos($raw, '/') === 0 && function_exists('home_url')) {
+        $raw = home_url($raw);
+    }
+
+    return function_exists('esc_url_raw') ? esc_url_raw($raw) : $raw;
+}
+}
+
+if (!function_exists('dms_ecom_collect_brand_image_attachment_ids')) {
+function dms_ecom_collect_brand_image_attachment_ids($term_id) {
+    $attachment_ids = array();
+    if (!function_exists('dms_ecom_get_term_meta_value')) {
+        return $attachment_ids;
+    }
+    foreach (dms_ecom_brand_image_meta_keys() as $meta_key) {
+        $value = dms_ecom_get_term_meta_value($term_id, $meta_key);
+        if (is_numeric($value)) {
+            $attachment_id = absint($value);
+            if ($attachment_id > 0) {
+                $attachment_ids[$attachment_id] = $attachment_id;
+            }
+            continue;
+        }
+        if (is_array($value)) {
+            foreach (array('id', 'ID', 'attachment_id', 'image_id', 'logo_id') as $key) {
+                if (!empty($value[$key]) && is_numeric($value[$key])) {
+                    $attachment_id = absint($value[$key]);
+                    if ($attachment_id > 0) {
+                        $attachment_ids[$attachment_id] = $attachment_id;
+                    }
+                }
+            }
+        }
+    }
+    return $attachment_ids;
+}
+}
+
+if (!function_exists('dms_ecom_brand_image_meta_cache_bump')) {
+function dms_ecom_brand_image_meta_cache_bump($meta_id, $term_id, $meta_key, $meta_value) {
+    if (!in_array((string) $meta_key, dms_ecom_brand_image_meta_keys(), true)) {
+        return;
+    }
+    if (function_exists('lpco_dms_bump_catalog_version')) {
+        lpco_dms_bump_catalog_version('brand_image_meta_update');
+    }
+    if (function_exists('lpco_dms_clear_catalog_cache')) {
+        lpco_dms_clear_catalog_cache('brand_image_meta_update', 0);
+    }
+}
+}
+
+if (function_exists('add_action') && (!function_exists('has_action') || !has_action('updated_term_meta', 'dms_ecom_brand_image_meta_cache_bump'))) {
+    add_action('added_term_meta', 'dms_ecom_brand_image_meta_cache_bump', 10, 4);
+    add_action('updated_term_meta', 'dms_ecom_brand_image_meta_cache_bump', 10, 4);
+    add_action('deleted_term_meta', 'dms_ecom_brand_image_meta_cache_bump', 10, 4);
+}
+
 if (!function_exists('dms_ecom_resolve_brand_image_url')) {
 function dms_ecom_resolve_brand_image_url($term) {
     if (!class_exists('WP_Term') || !($term instanceof WP_Term)) return '';
     if (!function_exists('dms_ecom_get_term_meta_value')) return '';
-    $cands = array(dms_ecom_get_term_meta_value($term->term_id, 'thumbnail_id'), dms_ecom_get_term_meta_value($term->term_id, 'brand_logo_id'), dms_ecom_get_term_meta_value($term->term_id, 'brand_image_id'), dms_ecom_get_term_meta_value($term->term_id, 'brand_logo'), dms_ecom_get_term_meta_value($term->term_id, 'brand_image'));
-    foreach ($cands as $val) {
-        if (empty($val)) continue;
-        if (function_exists('dms_ecom_get_attachment_url_cached') && is_numeric($val)) {
-            $url = dms_ecom_get_attachment_url_cached($val);
-        } else {
-            $url = function_exists('esc_url_raw') ? esc_url_raw($val) : $val;
+    foreach (dms_ecom_brand_image_meta_keys() as $meta_key) {
+        $url = dms_ecom_resolve_brand_image_meta_value(dms_ecom_get_term_meta_value($term->term_id, $meta_key));
+        if ($url !== '') {
+            return $url;
         }
-        if (!empty($url)) return $url;
     }
     return '';
 }
 }
 
-if (!function_exists('dms_ecom_brand_category_slug_matches')) {
-function dms_ecom_brand_category_slug_matches($category_slug, $brand_slug) {
-    $category_slug = sanitize_title((string) $category_slug);
-    $brand_slug = sanitize_title((string) $brand_slug);
-    if ($category_slug === '' || $brand_slug === '') return false;
-    return $category_slug === $brand_slug
-        || strpos($category_slug, $brand_slug . '-') === 0
-        || substr($category_slug, -strlen('-' . $brand_slug)) === '-' . $brand_slug
-        || strpos($category_slug, '-' . $brand_slug . '-') !== false;
-}
-}
-
 if (!function_exists('dms_ecom_get_linked_categories_for_brand')) {
-function dms_ecom_get_linked_categories_for_brand($brand_slug) {
+function dms_ecom_get_linked_categories_for_brand($brand_slug, $brand_taxonomy = '') {
     $brand_slug = sanitize_title((string) $brand_slug);
-    if ($brand_slug === '' || !function_exists('get_terms')) {
-        return array('ids' => array(), 'slugs' => array());
+    $brand_taxonomy = sanitize_key((string) $brand_taxonomy);
+    if ($brand_taxonomy === '') {
+        $brand_taxonomy = (function_exists('taxonomy_exists') && taxonomy_exists('product_brand')) ? 'product_brand' : 'product_tag';
+    }
+    if ($brand_slug === '' || !function_exists('taxonomy_exists') || !taxonomy_exists($brand_taxonomy)) {
+        return array('ids' => array(), 'slugs' => array(), 'categories' => array());
     }
 
-    $terms = get_terms(array(
-        'taxonomy' => 'product_cat',
-        'hide_empty' => false,
+    $query = class_exists('WP_Query') ? new WP_Query(array(
+        'post_type' => 'product',
+        'post_status' => 'publish',
+        'fields' => 'ids',
+        'posts_per_page' => -1,
+        'no_found_rows' => true,
+        'update_post_meta_cache' => true,
         'update_term_meta_cache' => true,
-        'orderby' => 'menu_order',
-        'order' => 'ASC',
-    ));
-    if (is_wp_error($terms) || empty($terms)) {
-        return array('ids' => array(), 'slugs' => array());
+        'tax_query' => array(
+            array(
+                'taxonomy' => $brand_taxonomy,
+                'field' => 'slug',
+                'terms' => array($brand_slug),
+            ),
+        ),
+    )) : null;
+    if (!$query) {
+        return array('ids' => array(), 'slugs' => array(), 'categories' => array());
     }
 
-    $root_ids = array();
-    foreach ((array) $terms as $term) {
-        if (!$term || (function_exists('dms_ecom_is_hidden_term_for_app') && dms_ecom_is_hidden_term_for_app($term, 'product_cat'))) {
+    $category_counts = array();
+    $category_terms = array();
+    foreach ((array) $query->posts as $product_id) {
+        $product_id = absint($product_id);
+        if ($product_id <= 0) {
             continue;
         }
-        if (sanitize_title((string) $term->slug) === $brand_slug) {
-            $root_ids[(int) $term->term_id] = true;
+        $product = function_exists('wc_get_product') ? wc_get_product($product_id) : null;
+        if (function_exists('wc_get_product') && !$product) {
+            continue;
+        }
+        if (function_exists('dms_ecom_product_is_hidden_for_app') && dms_ecom_product_is_hidden_for_app($product_id, $product)) {
+            continue;
+        }
+
+        $terms = function_exists('get_the_terms') ? get_the_terms($product_id, 'product_cat') : false;
+        if (empty($terms) || is_wp_error($terms)) {
+            continue;
+        }
+        foreach ((array) $terms as $term) {
+            if (!$term || is_wp_error($term)) {
+                continue;
+            }
+            if (function_exists('dms_ecom_is_hidden_term_for_app') && dms_ecom_is_hidden_term_for_app($term, 'product_cat')) {
+                continue;
+            }
+            $term_id = (int) $term->term_id;
+            $category_terms[$term_id] = $term;
+            $category_counts[$term_id] = isset($category_counts[$term_id]) ? $category_counts[$term_id] + 1 : 1;
         }
     }
+    if (function_exists('wp_reset_postdata')) wp_reset_postdata();
 
-    $matched = array();
-    foreach ((array) $terms as $term) {
-        if (!$term || (function_exists('dms_ecom_is_hidden_term_for_app') && dms_ecom_is_hidden_term_for_app($term, 'product_cat'))) {
-            continue;
-        }
-        $term_id = (int) $term->term_id;
-        $is_root = isset($root_ids[$term_id]);
-        $is_child = isset($root_ids[(int) $term->parent]);
-        $is_token_match = dms_ecom_brand_category_slug_matches($term->slug, $brand_slug);
-        if (!$is_root && !$is_child && !$is_token_match) {
-            continue;
-        }
-        $matched[$term_id] = $term;
-    }
-
-    uasort($matched, function($a, $b) use ($root_ids) {
-        $a_root = isset($root_ids[(int) $a->term_id]);
-        $b_root = isset($root_ids[(int) $b->term_id]);
-        if ($a_root !== $b_root) return $a_root ? -1 : 1;
+    uasort($category_terms, function($a, $b) {
         $a_order = function_exists('dms_ecom_get_term_meta_value') ? intval(dms_ecom_get_term_meta_value($a->term_id, 'menu_order')) : 0;
         $b_order = function_exists('dms_ecom_get_term_meta_value') ? intval(dms_ecom_get_term_meta_value($b->term_id, 'menu_order')) : 0;
         if ($a_order !== $b_order) return $a_order <=> $b_order;
@@ -1707,12 +2071,148 @@ function dms_ecom_get_linked_categories_for_brand($brand_slug) {
 
     $ids = array();
     $slugs = array();
-    foreach ($matched as $term) {
+    $categories = array();
+    foreach ($category_terms as $term) {
+        $term_id = (int) $term->term_id;
+        $product_count = isset($category_counts[$term_id]) ? (int) $category_counts[$term_id] : 0;
+        if ($product_count <= 0) {
+            continue;
+        }
         $ids[] = (int) $term->term_id;
         $slugs[] = (string) $term->slug;
+        $formatted = function_exists('dms_format_category_term') ? dms_format_category_term($term) : null;
+        if (!is_array($formatted)) {
+            $formatted = array(
+                'id' => $term_id,
+                'name' => (string) $term->name,
+                'slug' => (string) $term->slug,
+                'parent' => (int) $term->parent,
+            );
+        }
+        $formatted['count'] = $product_count;
+        $formatted['product_count'] = $product_count;
+        $categories[] = $formatted;
     }
 
-    return array('ids' => $ids, 'slugs' => $slugs);
+    return array('ids' => $ids, 'slugs' => $slugs, 'categories' => $categories);
+}
+}
+
+if (!function_exists('lpco_brand_category_layout_get')) {
+function lpco_brand_category_layout_get() {
+    $raw = function_exists('get_option') ? get_option('lpco_brand_category_layout', array()) : array();
+    return lpco_brand_category_layout_normalize(is_array($raw) ? $raw : array());
+}
+}
+
+if (!function_exists('lpco_brand_category_layout_save')) {
+function lpco_brand_category_layout_save($input) {
+    $layout = lpco_brand_category_layout_normalize(is_array($input) ? $input : array());
+    if (function_exists('update_option')) {
+        update_option('lpco_brand_category_layout', $layout, false);
+    }
+    if (function_exists('lpco_dms_bump_catalog_version')) {
+        lpco_dms_bump_catalog_version('brand_category_layout_save');
+    }
+    if (function_exists('lpco_dms_clear_catalog_cache')) {
+        lpco_dms_clear_catalog_cache('brand_category_layout_save', 0);
+    }
+    return $layout;
+}
+}
+
+if (!function_exists('lpco_brand_category_layout_normalize')) {
+function lpco_brand_category_layout_normalize($input) {
+    $normalized = array();
+    foreach ((array) $input as $brand_slug => $entry) {
+        $slug = sanitize_title((string) $brand_slug);
+        if ($slug === '' || !is_array($entry)) {
+            continue;
+        }
+        $category_ids = array_values(array_unique(array_filter(array_map('absint', (array) ($entry['category_ids'] ?? array())))));
+        $hidden_ids = array_values(array_unique(array_filter(array_map('absint', (array) ($entry['hidden_category_ids'] ?? array())))));
+        $updated_at = sanitize_text_field((string) ($entry['updated_at'] ?? ''));
+        if ($updated_at === '') {
+            $updated_at = function_exists('current_time') ? current_time('mysql', true) : gmdate('Y-m-d H:i:s');
+        }
+        $revision_source = $slug . '|' . implode(',', $category_ids) . '|' . implode(',', $hidden_ids) . '|' . $updated_at;
+        $normalized[$slug] = array(
+            'category_ids' => $category_ids,
+            'hidden_category_ids' => $hidden_ids,
+            'updated_at' => $updated_at,
+            'revision' => md5($revision_source),
+        );
+    }
+    return $normalized;
+}
+}
+
+if (!function_exists('dms_get_brand_categories')) {
+function dms_get_brand_categories($request) {
+    $brand_slug = is_object($request) && method_exists($request, 'get_param')
+        ? sanitize_title((string) $request->get_param('brand_slug'))
+        : '';
+    if ($brand_slug === '') {
+        return new WP_Error('missing_brand_slug', 'brand_slug is required', array('status' => 400));
+    }
+
+    $brand_taxonomy = (function_exists('taxonomy_exists') && taxonomy_exists('product_brand')) ? 'product_brand' : 'product_tag';
+    $brand = function_exists('get_term_by') ? get_term_by('slug', $brand_slug, $brand_taxonomy) : null;
+    if (!$brand || is_wp_error($brand)) {
+        return new WP_Error('brand_not_found', 'Brand was not found', array('status' => 404));
+    }
+
+    $layout = lpco_brand_category_layout_get();
+    $entry = $layout[$brand_slug] ?? array();
+    $manual_ids = array_values(array_filter(array_map('absint', (array) ($entry['category_ids'] ?? array()))));
+    $hidden_ids = array_values(array_filter(array_map('absint', (array) ($entry['hidden_category_ids'] ?? array()))));
+    $categories = array();
+
+    if (!empty($manual_ids)) {
+        foreach ($manual_ids as $category_id) {
+            if (in_array($category_id, $hidden_ids, true)) {
+                continue;
+            }
+            $term = function_exists('get_term') ? get_term($category_id, 'product_cat') : null;
+            if (!$term || is_wp_error($term)) {
+                continue;
+            }
+            if (function_exists('dms_ecom_is_hidden_term_for_app') && dms_ecom_is_hidden_term_for_app($term, 'product_cat')) {
+                continue;
+            }
+            $categories[] = array(
+                'id' => (int) $term->term_id,
+                'name' => (string) $term->name,
+                'slug' => (string) $term->slug,
+                'parent' => (int) $term->parent,
+            );
+        }
+    } else {
+        $linked = dms_ecom_get_linked_categories_for_brand($brand_slug, $brand_taxonomy);
+        foreach ((array) ($linked['categories'] ?? array()) as $category) {
+            $category_id = absint($category['id'] ?? 0);
+            if ($category_id <= 0 || in_array($category_id, $hidden_ids, true)) {
+                continue;
+            }
+            $categories[] = array(
+                'id' => $category_id,
+                'name' => (string) ($category['name'] ?? ''),
+                'slug' => (string) ($category['slug'] ?? ''),
+                'parent' => (int) ($category['parent'] ?? 0),
+            );
+        }
+    }
+
+    return array(
+        'success' => true,
+        'brand' => array(
+            'id' => (int) $brand->term_id,
+            'name' => (string) $brand->name,
+            'slug' => (string) $brand->slug,
+        ),
+        'categories' => array_values($categories),
+        'revision' => (string) ($entry['revision'] ?? md5($brand_slug . ':' . count($categories))),
+    );
 }
 }
 
@@ -1722,7 +2222,10 @@ function dms_get_brands_base($request) {
     $is_guest = function_exists('lpco_dms_is_guest_request') ? lpco_dms_is_guest_request($request) : true;
     list($uid, $grp, $cur) = dms_ecom_get_request_user_context($request, $is_guest);
     $ckey = $is_guest ? (function_exists('lpco_dms_guest_cache_key') ? lpco_dms_guest_cache_key('brands', $request) : '') : (function_exists('lpco_dms_auth_cache_key') ? lpco_dms_auth_cache_key('brands', $request, $uid, $grp, $cur) : '');
-    if ($ckey && function_exists('lpco_dms_guest_cache_get') && ($cached = ($is_guest ? lpco_dms_guest_cache_get($ckey) : (function_exists('lpco_dms_auth_cache_get') ? lpco_dms_auth_cache_get($ckey) : false))) !== false) return $cached;
+    $force_refresh = is_object($request) && method_exists($request, 'get_param')
+        ? dms_ecom_truthy_param($request->get_param('force_refresh'))
+        : false;
+    if (!$force_refresh && $ckey && function_exists('lpco_dms_guest_cache_get') && ($cached = ($is_guest ? lpco_dms_guest_cache_get($ckey) : (function_exists('lpco_dms_auth_cache_get') ? lpco_dms_auth_cache_get($ckey) : false))) !== false) return $cached;
     
     $limit = is_object($request) && method_exists($request, 'get_param') ? max(1, intval($request->get_param('per_page') ?: 50)) : 50;
     $page = is_object($request) && method_exists($request, 'get_param') ? max(1, intval($request->get_param('page') ?: 1)) : 1;
@@ -1733,8 +2236,11 @@ function dms_get_brands_base($request) {
     $attachments = array();
     if (function_exists('dms_ecom_get_term_meta_value') && function_exists('absint')) {
         foreach ($terms as $t) {
-            foreach (array('thumbnail_id', 'brand_logo_id', 'brand_image_id') as $m) {
-                if ($aid = absint(dms_ecom_get_term_meta_value($t->term_id, $m))) $attachments[$aid] = $aid;
+            $brand_attachment_ids = function_exists('dms_ecom_collect_brand_image_attachment_ids')
+                ? dms_ecom_collect_brand_image_attachment_ids($t->term_id)
+                : array();
+            foreach ($brand_attachment_ids as $aid) {
+                if ($aid) $attachments[$aid] = $aid;
             }
         }
     }
@@ -1758,17 +2264,19 @@ function dms_get_brands_base($request) {
             : intval($t->count);
 
         $linked_categories = function_exists('dms_ecom_get_linked_categories_for_brand')
-            ? dms_ecom_get_linked_categories_for_brand($t->slug)
-            : array('ids' => array(), 'slugs' => array());
+            ? dms_ecom_get_linked_categories_for_brand($t->slug, $tax)
+            : array('ids' => array(), 'slugs' => array(), 'categories' => array());
 
         $brands[] = array(
             'id' => $t->term_id,
             'name' => $t->name,
             'slug' => $t->slug,
             'count' => $visible_count,
+            'product_count' => $visible_count,
             'image_url' => function_exists('dms_ecom_resolve_brand_image_url') ? dms_ecom_resolve_brand_image_url($t) : '',
             'linked_category_ids' => $linked_categories['ids'],
             'linked_category_slugs' => $linked_categories['slugs'],
+            'categories' => $linked_categories['categories'],
             'taxonomy' => $tax,
             'show_in_app' => true,
             'hidden' => false,
@@ -1785,10 +2293,21 @@ function dms_get_brands_base($request) {
         $brands = array_values($brands);
     }
     
-    if ($ckey && function_exists('lpco_dms_guest_cache_set')) {
+    if (!$force_refresh && $ckey && function_exists('lpco_dms_guest_cache_set')) {
         if ($is_guest) lpco_dms_guest_cache_set($ckey, $brands); elseif (function_exists('lpco_dms_auth_cache_set')) lpco_dms_auth_cache_set($ckey, $brands);
     }
     return $brands;
+}
+}
+
+if (!function_exists('dms_get_brands_categories')) {
+function dms_get_brands_categories($request) {
+    $brands = dms_get_brands_base($request);
+    if (is_wp_error($brands)) return $brands;
+    return array(
+        'success' => true,
+        'data' => array_values((array) $brands),
+    );
 }
 }
 

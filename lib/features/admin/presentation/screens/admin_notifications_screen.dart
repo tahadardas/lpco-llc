@@ -18,8 +18,10 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
   final TextEditingController _bodyController = TextEditingController();
   final TextEditingController _imageController = TextEditingController();
   final TextEditingController _deepLinkController = TextEditingController();
+  final TextEditingController _actionValueController = TextEditingController();
 
   String _audience = 'all';
+  String _actionType = 'none';
   AdminUserModel? _targetUser;
   int _page = 1;
   String _historySearch = '';
@@ -39,6 +41,7 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
     _bodyController.dispose();
     _imageController.dispose();
     _deepLinkController.dispose();
+    _actionValueController.dispose();
     super.dispose();
   }
 
@@ -144,6 +147,8 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
         audience: _audience,
         imageUrl: _imageController.text,
         deepLink: _deepLinkController.text,
+        actionType: _actionType,
+        actionValue: _actionValueController.text,
         targetUserId: _targetUser?.id,
       );
       if (!mounted) return;
@@ -154,6 +159,8 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
       _bodyController.clear();
       _imageController.clear();
       _deepLinkController.clear();
+      _actionValueController.clear();
+      _actionType = 'none';
       _targetUser = null;
       _refresh();
     } catch (error) {
@@ -170,6 +177,16 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
         setState(() => _sending = false);
       }
     }
+  }
+
+  bool _actionTypeRequiresNoValue(String actionType) {
+    return <String>{
+      'none',
+      'orders',
+      'cart',
+      'account',
+      'notifications',
+    }.contains(actionType);
   }
 
   @override
@@ -259,6 +276,64 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
                             _targetUser == null
                                 ? 'اختيار مستخدم'
                                 : 'المستخدم: ${_targetUser!.displayName.isEmpty ? _targetUser!.username : _targetUser!.displayName}',
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        initialValue: _actionType,
+                        decoration: const InputDecoration(
+                          labelText: 'نوع الإجراء',
+                        ),
+                        items: const <DropdownMenuItem<String>>[
+                          DropdownMenuItem(value: 'none', child: Text('بدون')),
+                          DropdownMenuItem(
+                            value: 'product',
+                            child: Text('منتج'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'category',
+                            child: Text('تصنيف'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'brand',
+                            child: Text('علامة تجارية'),
+                          ),
+                          DropdownMenuItem(value: 'search', child: Text('بحث')),
+                          DropdownMenuItem(
+                            value: 'orders',
+                            child: Text('الطلبات'),
+                          ),
+                          DropdownMenuItem(value: 'cart', child: Text('السلة')),
+                          DropdownMenuItem(
+                            value: 'account',
+                            child: Text('الحساب'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'notifications',
+                            child: Text('الإشعارات'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'externalUrl',
+                            child: Text('رابط خارجي'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'internalRoute',
+                            child: Text('مسار داخلي'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setState(() => _actionType = value ?? 'none');
+                        },
+                      ),
+                      if (!_actionTypeRequiresNoValue(_actionType)) ...[
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _actionValueController,
+                          decoration: const InputDecoration(
+                            labelText: 'قيمة الإجراء',
+                            hintText:
+                                'ID المنتج/التصنيف أو slug العلامة أو كلمة البحث',
                           ),
                         ),
                       ],

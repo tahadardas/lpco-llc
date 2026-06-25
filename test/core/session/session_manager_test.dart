@@ -125,23 +125,26 @@ void main() {
       expect(restored, isNull);
     });
 
-    test('network expiration clears session and emits an event', () async {
-      final storage = FakeSessionStorage();
-      final manager = SessionManager(storage: storage);
+    test(
+      'network authorization failure preserves session and emits an event',
+      () async {
+        final storage = FakeSessionStorage();
+        final manager = SessionManager(storage: storage);
 
-      await manager.persistAuthenticatedSession(
-        token: 'token-3',
-        user: _user(id: 40),
-      );
-      final eventFuture = manager.expiredEvents.first;
+        await manager.persistAuthenticatedSession(
+          token: 'token-3',
+          user: _user(id: 40),
+        );
+        final eventFuture = manager.expiredEvents.first;
 
-      await manager.expireFromNetworkFailure(statusCode: 401);
-      final event = await eventFuture;
+        await manager.expireFromNetworkFailure(statusCode: 401);
+        final event = await eventFuture;
 
-      expect(event.statusCode, 401);
-      expect(storage.token, isNull);
-      expect(storage.user, isNull);
-      expect(storage.metadata, isNull);
-    });
+        expect(event.statusCode, 401);
+        expect(storage.token, 'token-3');
+        expect(storage.user?.id, 40);
+        expect(storage.metadata, isNotNull);
+      },
+    );
   });
 }

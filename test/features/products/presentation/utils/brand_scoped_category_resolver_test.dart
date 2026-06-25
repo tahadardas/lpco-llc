@@ -8,13 +8,6 @@ void main() {
     'filters resolved brand categories by available product category ids',
     () {
       const resolver = BrandScopedCategoryResolver();
-      const brand = BrandModel(
-        id: 1,
-        name: 'Deli',
-        slug: 'deli',
-        count: 10,
-        imageUrl: '',
-      );
       const available = CategoryModel(
         id: 10,
         name: 'Deli pens',
@@ -28,6 +21,14 @@ void main() {
         slug: 'deli-binders',
         count: 3,
         imageUrl: '',
+      );
+      const brand = BrandModel(
+        id: 1,
+        name: 'Deli',
+        slug: 'deli',
+        count: 10,
+        imageUrl: '',
+        linkedCategories: <CategoryModel>[available, unavailable],
       );
 
       final resolved = resolver.resolve(

@@ -21,6 +21,8 @@ class ProductState {
   final List<CategoryModel> categories;
   final List<BrandModel> brands;
   final List<ProductModel> bannerProducts;
+  final List<ProductModel> featuredProducts;
+  final List<ProductModel> latestProducts;
   final int page;
   final bool hasMore;
   final String errorMessage;
@@ -50,6 +52,8 @@ class ProductState {
     this.categories = const <CategoryModel>[],
     this.brands = const <BrandModel>[],
     this.bannerProducts = const <ProductModel>[],
+    this.featuredProducts = const <ProductModel>[],
+    this.latestProducts = const <ProductModel>[],
     this.page = 1,
     this.hasMore = true,
     this.errorMessage = '',
@@ -80,6 +84,8 @@ class ProductState {
     List<CategoryModel>? categories,
     List<BrandModel>? brands,
     List<ProductModel>? bannerProducts,
+    List<ProductModel>? featuredProducts,
+    List<ProductModel>? latestProducts,
     int? page,
     bool? hasMore,
     String? errorMessage,
@@ -111,6 +117,8 @@ class ProductState {
       categories: categories ?? this.categories,
       brands: brands ?? this.brands,
       bannerProducts: bannerProducts ?? this.bannerProducts,
+      featuredProducts: featuredProducts ?? this.featuredProducts,
+      latestProducts: latestProducts ?? this.latestProducts,
       page: page ?? this.page,
       hasMore: hasMore ?? this.hasMore,
       errorMessage: errorMessage ?? this.errorMessage,
@@ -200,15 +208,14 @@ class ProductCubit extends Cubit<ProductState> {
           ),
           _repository.getCachedCategories(guest: state.isGuest),
           _repository.getCachedBrands(guest: state.isGuest),
-          _repository.getCachedHomeBannerData(guest: state.isGuest),
           _repository.getCachedHomeBannersData(guest: state.isGuest),
         ]);
 
         final cachedProducts = results[0] as List<ProductModel>;
         final cachedCategories = results[1] as List<CategoryModel>;
         final cachedBrands = results[2] as List<BrandModel>;
-        final cachedBanner = results[3] as HomeBannerData;
-        final cachedBannersList = results[4] as List<HomeBannerSlideData>;
+        final cachedBannersList = results[3] as List<HomeBannerSlideData>;
+        final cachedBanner = _bannerDataFromSlides(cachedBannersList);
 
         if (cachedProducts.isNotEmpty || cachedCategories.isNotEmpty) {
           _logBrandOrder(
@@ -267,28 +274,42 @@ class ProductCubit extends Cubit<ProductState> {
       );
       final results = await Future.wait([
         productsPageFuture,
-        _repository.getCategories(guest: state.isGuest, forceRefresh: forceRefresh),
+        _repository.getCategories(
+          guest: state.isGuest,
+          forceRefresh: forceRefresh,
+        ),
         _repository.getBrands(guest: state.isGuest, forceRefresh: forceRefresh),
-        _repository.getHomeBannerData(guest: state.isGuest, forceRefresh: forceRefresh),
-        _repository.getHomeBannersData(guest: state.isGuest, forceRefresh: forceRefresh),
+        _repository.getHomeBannersData(
+          guest: state.isGuest,
+          forceRefresh: forceRefresh,
+        ),
+        _repository.getHomeLayoutConfig(
+          guest: state.isGuest,
+          forceRefresh: forceRefresh,
+        ),
       ]);
 
       final productsPage = results[0] as CatalogProductsPage;
       final remoteProducts = productsPage.products;
-      final bannerData = results[3] as HomeBannerData;
-      final remoteBannersList = results[4] as List<HomeBannerSlideData>;
+      final remoteBannersList = results[3] as List<HomeBannerSlideData>;
+      final bannerData = _bannerDataFromSlides(remoteBannersList);
+      final homeLayout = results[4] as HomeLayoutConfig;
       _logBrandOrder(
         'remote ids=${_idsForLog(remoteProducts)}',
         brandSlug: state.selectedBrandSlug,
       );
 
       List<ProductModel> bannerProducts = [];
-      if (bannerData.productIds.isNotEmpty) {
+      final sliderIds = homeLayout.sliderProductIds.isNotEmpty
+          ? homeLayout.sliderProductIds
+          : bannerData.productIds;
+      if (sliderIds.isNotEmpty) {
         try {
           bannerProducts = await _repository.getProductsByIds(
-            bannerData.productIds,
+            sliderIds,
             guest: state.isGuest,
             includeGallery: true,
+            forceRefresh: forceRefresh,
           );
         } catch (e) {
           if (kDebugMode) {
@@ -298,6 +319,34 @@ class ProductCubit extends Cubit<ProductState> {
           }
         }
       }
+      var featuredProducts = <ProductModel>[];
+      if (homeLayout.featuredProductIds.isNotEmpty) {
+        featuredProducts = await _repository.getProductsByIds(
+          homeLayout.featuredProductIds,
+          guest: state.isGuest,
+          includeGallery: true,
+          forceRefresh: forceRefresh,
+        );
+      }
+      var latestProducts = <ProductModel>[];
+      if (homeLayout.latestProductIds.isNotEmpty) {
+        latestProducts = await _repository.getProductsByIds(
+          homeLayout.latestProductIds,
+          guest: state.isGuest,
+          includeGallery: true,
+          forceRefresh: forceRefresh,
+        );
+      } else if (homeLayout.latestMode == 'auto') {
+        final latestPage = await _repository.getProductsPage(
+          page: 1,
+          perPage: 12,
+          orderBy: 'date',
+          order: 'desc',
+          guest: state.isGuest,
+          forceRefresh: forceRefresh,
+        );
+        latestProducts = latestPage.products;
+      }
 
       emit(
         state.copyWith(
@@ -306,6 +355,8 @@ class ProductCubit extends Cubit<ProductState> {
           categories: results[1] as List<CategoryModel>,
           brands: results[2] as List<BrandModel>,
           bannerProducts: bannerProducts,
+          featuredProducts: featuredProducts,
+          latestProducts: latestProducts,
           page: 1,
           hasMore: productsPage.meta.hasMore,
           errorMessage: '',
@@ -337,6 +388,20 @@ class ProductCubit extends Cubit<ProductState> {
     } finally {
       _isSyncing = false;
     }
+  }
+
+  HomeBannerData _bannerDataFromSlides(List<HomeBannerSlideData> slides) {
+    if (slides.isEmpty) return const HomeBannerData.empty();
+    final first = slides.first;
+    return HomeBannerData(
+      enabled: first.enabled,
+      imageUrl: first.imageUrl,
+      title: first.title,
+      subtitle: first.subtitle,
+      buttonLabel: first.buttonLabel,
+      buttonLink: first.buttonLink,
+      productIds: first.productIds,
+    );
   }
 
   Future<void> loadMore() async {
@@ -441,9 +506,13 @@ class ProductCubit extends Cubit<ProductState> {
     if (forceRemote) {
       bool revisionChanged = false;
       try {
-        revisionChanged = await _repository.syncCatalogRevision(guest: state.isGuest);
+        revisionChanged = await _repository.syncCatalogRevision(
+          guest: state.isGuest,
+        );
         if (kDebugMode) {
-          debugPrint('[PRODUCT_CUBIT] syncCatalogRevision result: changed=$revisionChanged');
+          debugPrint(
+            '[PRODUCT_CUBIT] syncCatalogRevision result: changed=$revisionChanged',
+          );
         }
       } catch (e) {
         if (kDebugMode) {
@@ -451,7 +520,9 @@ class ProductCubit extends Cubit<ProductState> {
         }
       }
       if (revisionChanged && kDebugMode) {
-        debugPrint('[PRODUCT_CUBIT] Catalog revision changed, clearing cached data for fresh fetch');
+        debugPrint(
+          '[PRODUCT_CUBIT] Catalog revision changed, clearing cached data for fresh fetch',
+        );
       }
     }
     await initialize(forceRefresh: forceRemote);

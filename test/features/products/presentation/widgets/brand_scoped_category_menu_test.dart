@@ -15,7 +15,11 @@ class _TestSearchFilterCubit extends SearchFilterCubit {
   }
 
   @override
-  Future<void> search({required bool reset, bool persistRecent = true, bool forceRefresh = false}) async {
+  Future<void> search({
+    required bool reset,
+    bool persistRecent = true,
+    bool forceRefresh = false,
+  }) async {
     emit(
       state.copyWith(
         status: SearchFilterStatus.loaded,
@@ -124,6 +128,16 @@ void main() {
       findsOneWidget,
     );
     expect(
+      find.byKey(const ValueKey<String>('brand_scoped_category_button')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('brand_scoped_category_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
       find.byKey(
         const ValueKey<String>(
           'brand_scoped_category_item_deli_1_deli-calculators',
@@ -139,6 +153,122 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const ValueKey<String>('brand_scoped_category_sheet')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('many categories stay in a scrollable bottom sheet', (
+    tester,
+  ) async {
+    final categories = List<CategoryModel>.generate(
+      41,
+      (index) => CategoryModel(
+        id: index + 1,
+        name: 'Category ${index + 1}',
+        slug: 'category-${index + 1}',
+        count: index + 1,
+        imageUrl: '',
+      ),
+    );
+    final brand = BrandModel(
+      id: 8,
+      name: 'Deli',
+      slug: 'deli',
+      count: 41,
+      imageUrl: '',
+      linkedCategoryIds: categories.map((category) => category.id).toList(),
+    );
+
+    await pumpMenu(
+      tester,
+      brand: brand,
+      categories: categories,
+      productDerivedCategoryIds: const <int>{},
+      size: const Size(390, 844),
+      onSelectCategory: (_) async {},
+      onClearCategory: () async {},
+    );
+
+    expect(
+      find.byKey(const ValueKey<String>('brand_scoped_category_button')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('brand_scoped_category_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('brand_scoped_category_sheet')),
+      findsOneWidget,
+    );
+    expect(find.byType(Wrap), findsWidgets);
+    expect(find.byType(SingleChildScrollView), findsWidgets);
+  });
+
+  testWidgets('category button leaves vertical product scrolling', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: Column(
+              children: <Widget>[
+                BrandScopedCategoryMenu(
+                  brand: _deliBrand,
+                  brandSlug: _deliBrand.slug,
+                  brandTitle: _deliBrand.name,
+                  categories: const <CategoryModel>[
+                    _deliRootCategory,
+                    _deliCalculatorsCategory,
+                    _deliGelCategory,
+                  ],
+                  selectedCategoryIds: const <int>{},
+                  productDerivedCategoryIds: const <int>{100, 101, 102},
+                  onSelectCategory: (_) async {},
+                  onClearCategory: () async {},
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    key: const ValueKey<String>('products_vertical_scroll'),
+                    itemCount: 30,
+                    itemBuilder: (_, index) =>
+                        SizedBox(height: 80, child: Text('Product $index')),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Product 0'), findsOneWidget);
+    expect(find.text('Product 20'), findsNothing);
+
+    await tester.drag(
+      find.byKey(const ValueKey<String>('products_vertical_scroll')),
+      const Offset(0, -1800),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Product 0'), findsNothing);
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('products_vertical_scroll')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(scrollable.position.pixels, greaterThan(0));
   });
 
   testWidgets('menu hides slug-only categories without available product ids', (
@@ -213,6 +343,11 @@ void main() {
       );
 
       await tester.tap(
+        find.byKey(const ValueKey<String>('brand_scoped_category_button')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
         find.byKey(
           const ValueKey<String>(
             'brand_scoped_category_item_deli_2_deli-gel-pens',
@@ -242,10 +377,15 @@ void main() {
       onClearCategory: () async {},
     );
 
+    await tester.tap(
+      find.byKey(const ValueKey<String>('brand_scoped_category_button')),
+    );
+    await tester.pumpAndSettle();
+
     expect(
       find.byKey(
         const ValueKey<String>(
-          'brand_scoped_category_item_deli_2_other-category',
+          'brand_scoped_category_item_deli_1_other-category',
         ),
       ),
       findsOneWidget,
@@ -284,6 +424,11 @@ void main() {
         ),
         onClearCategory: () => cubit.applyCuratedCategory(null),
       );
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('brand_scoped_category_button')),
+      );
+      await tester.pumpAndSettle();
 
       await tester.tap(
         find.byKey(const ValueKey<String>('brand_scoped_category_all')),

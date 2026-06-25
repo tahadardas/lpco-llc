@@ -104,64 +104,62 @@ require_once dirname(__FILE__) . '/api/catalog-logic.php';
 require_once dirname(__FILE__) . '/api/order-logic.php';
 require_once dirname(__FILE__) . '/api/user-logic.php';
 
-// ============================================================================
-// ROUTE REGISTRATION
-// ============================================================================
-
-add_action('rest_api_init', function () {
+// Legacy compatibility helpers only. Route registration is owned by
+// includes/api/*-routes.php to guarantee one source per REST endpoint.
+if (false) {
     $namespace = 'dms/v1';
 
     // Catalog Routes
-    register_rest_route($namespace, '/products', array(
+    dms_legacy_route_definition($namespace, '/products', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_products_with_prices',
         'permission_callback' => 'lpco_dms_verify_app_token_or_guest',
     ));
 
-    register_rest_route($namespace, '/products-plus', array(
+    dms_legacy_route_definition($namespace, '/products-plus', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_products_plus',
         'permission_callback' => 'lpco_dms_verify_app_token_or_guest',
     ));
 
-    register_rest_route($namespace, '/public/products', array(
+    dms_legacy_route_definition($namespace, '/public/products', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_products_guest',
         'permission_callback' => '__return_true',
     ));
 
-    register_rest_route($namespace, '/categories', array(
+    dms_legacy_route_definition($namespace, '/categories', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_categories_auth',
         'permission_callback' => 'lpco_dms_verify_app_token_or_guest',
     ));
 
-    register_rest_route($namespace, '/public/categories', array(
+    dms_legacy_route_definition($namespace, '/public/categories', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_categories_guest',
         'permission_callback' => '__return_true',
     ));
 
-    register_rest_route($namespace, '/home-by-category', array(
+    dms_legacy_route_definition($namespace, '/home-by-category', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_home_by_category',
         'permission_callback' => 'lpco_dms_verify_app_token_or_guest',
     ));
 
-    register_rest_route($namespace, '/brands', array(
+    dms_legacy_route_definition($namespace, '/brands', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_brands_auth',
         'permission_callback' => 'lpco_dms_verify_app_token_or_guest',
     ));
 
-    register_rest_route($namespace, '/public/brands', array(
+    dms_legacy_route_definition($namespace, '/public/brands', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_brands_guest',
         'permission_callback' => '__return_true',
     ));
 
     // Order Routes
-    register_rest_route($namespace, '/orders', array(
+    dms_legacy_route_definition($namespace, '/orders', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_user_orders',
         'permission_callback' => 'lpco_dms_verify_app_token_auth',
@@ -173,44 +171,44 @@ add_action('rest_api_init', function () {
         ),
     ));
 
-    register_rest_route($namespace, '/orders', array(
+    dms_legacy_route_definition($namespace, '/orders', array(
         'methods'             => WP_REST_Server::CREATABLE,
         'callback'            => 'dms_create_order',
         'permission_callback' => 'lpco_dms_verify_app_token_auth',
     ));
 
-    register_rest_route($namespace, '/orders/(?P<id>\d+)/sham-cash-confirm', array(
+    dms_legacy_route_definition($namespace, '/orders/(?P<id>\d+)/sham-cash-confirm', array(
         'methods'             => WP_REST_Server::CREATABLE,
         'callback'            => 'dms_confirm_sham_cash_transfer',
         'permission_callback' => 'lpco_dms_verify_app_token_auth',
     ));
 
     // User Profile Routes
-    register_rest_route($namespace, '/users/(?P<id>\d+)', array(
+    dms_legacy_route_definition($namespace, '/users/(?P<id>\d+)', array(
         'methods'             => WP_REST_Server::READABLE,
         'callback'            => 'dms_get_user_with_meta',
         'permission_callback' => 'dms_permission_jwt',
     ));
 
-    register_rest_route($namespace, '/users/(?P<id>\d+)', array(
+    dms_legacy_route_definition($namespace, '/users/(?P<id>\d+)', array(
         'methods'             => WP_REST_Server::EDITABLE,
         'callback'            => 'dms_update_user_profile',
         'permission_callback' => 'dms_permission_jwt',
     ));
 
     // Registration & Job Routes
-    register_rest_route($namespace, '/register', array(
+    dms_legacy_route_definition($namespace, '/register', array(
         'methods'             => WP_REST_Server::CREATABLE,
         'callback'            => 'dms_register_user',
         'permission_callback' => '__return_true',
     ));
 
-    register_rest_route($namespace, '/jobs/apply', array(
+    dms_legacy_route_definition($namespace, '/jobs/apply', array(
         'methods'             => WP_REST_Server::CREATABLE,
         'callback'            => 'dms_submit_job_application',
         'permission_callback' => '__return_true',
     ));
-});
+}
 
 add_action('wp_mail_failed', function ($error) {
     if (!$error instanceof WP_Error) return;

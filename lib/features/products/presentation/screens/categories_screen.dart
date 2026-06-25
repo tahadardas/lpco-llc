@@ -12,6 +12,7 @@ import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/categories_cubit.dart';
+import 'package:lpco_llc/features/products/presentation/widgets/global_catalog_search_bar.dart';
 
 List<CategoryModel> _visibleChildren(
   CategoryModel parent,
@@ -62,16 +63,9 @@ class _CategoriesView extends StatefulWidget {
 class _CategoriesViewState extends State<_CategoriesView> {
   final Set<int> _expandedIds = <int>{};
 
-  double _topContentPadding(BuildContext context) {
-    return MediaQuery.paddingOf(context).top +
-        BrandAppBar.toolbarHeightValue +
-        14;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
       appBar: BrandAppBar(
         title: 'التصفح',
         showMenu: true,
@@ -117,8 +111,9 @@ class _CategoriesViewState extends State<_CategoriesView> {
                     ),
                     const SizedBox(height: 12),
                     FilledButton(
-                      onPressed: () =>
-                          context.read<CategoriesCubit>().refresh(forceRemote: true),
+                      onPressed: () => context.read<CategoriesCubit>().refresh(
+                        forceRemote: true,
+                      ),
                       child: const Text('إعادة المحاولة'),
                     ),
                   ],
@@ -141,17 +136,26 @@ class _CategoriesViewState extends State<_CategoriesView> {
                 ..sort(_compareCategoryOrder);
 
           return RefreshIndicator(
-            onRefresh: () => context.read<CategoriesCubit>().refresh(forceRemote: true),
+            onRefresh: () =>
+                context.read<CategoriesCubit>().refresh(forceRemote: true),
             child: ListView.builder(
-              padding: EdgeInsets.fromLTRB(
-                14,
-                _topContentPadding(context),
-                14,
-                24,
-              ),
-              itemCount: mainCategories.isEmpty ? 2 : mainCategories.length + 1,
+              padding: EdgeInsets.fromLTRB(14, 14, 14, 24),
+              itemCount: mainCategories.isEmpty ? 3 : mainCategories.length + 2,
               itemBuilder: (context, index) {
                 if (index == 0) {
+                  return GlobalCatalogSearchBar(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    onSearch: (query) => context.push(
+                      query.isEmpty
+                          ? AppRoutePaths.catalogSearchEntry(
+                              entry: 'categories',
+                              basePath: AppRoutePaths.categoriesCatalog,
+                            )
+                          : AppRoutePaths.searchUrl(query: query),
+                    ),
+                  );
+                }
+                if (index == 1) {
                   return const Padding(
                     padding: EdgeInsets.only(bottom: 14),
                     child: _CategoriesHeaderBlock(),
@@ -162,7 +166,7 @@ class _CategoriesViewState extends State<_CategoriesView> {
                   return const _EmptyCategories();
                 }
 
-                final parent = mainCategories[index - 1];
+                final parent = mainCategories[index - 2];
                 final children = _visibleChildren(parent, categories);
                 final isExpanded = _expandedIds.contains(parent.id);
                 final hasChildren = children.isNotEmpty;

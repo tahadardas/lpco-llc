@@ -8,6 +8,7 @@ if (!defined('ABSPATH')) {
 }
 
 define('DMS_APP_HOME_BANNER_OPTION', 'dms_app_home_banner');
+define('DMS_APP_HOME_BANNERS_OPTION', 'dms_app_home_banners');
 
 if (!function_exists('dms_app_home_banner_defaults')) {
 function dms_app_home_banner_defaults() {
@@ -19,7 +20,20 @@ function dms_app_home_banner_defaults() {
         'subtitle' => '',
         'button_label' => '',
         'button_link' => '',
-        'product_ids' => ''
+        'action_type' => 'none',
+        'action_value' => '',
+        'product_ids' => '',
+        'show_title' => 1,
+        'show_subtitle' => 1,
+        'show_button' => 1,
+        'content_alignment' => 'start',
+        'content_vertical_alignment' => 'center',
+        'image_fit' => 'cover',
+        'overlay_opacity' => 60,
+        'title_color' => '#FFFFFF',
+        'subtitle_color' => '#FFFFFF',
+        'button_background_color' => '#D31225',
+        'button_text_color' => '#FFFFFF'
     );
 }
 }
@@ -38,6 +52,8 @@ function dms_app_home_banner_get() {
     $banner['subtitle'] = is_string($banner['subtitle']) ? $banner['subtitle'] : '';
     $banner['button_label'] = is_string($banner['button_label']) ? $banner['button_label'] : '';
     $banner['button_link'] = is_string($banner['button_link']) ? $banner['button_link'] : '';
+    $banner['action_type'] = is_string($banner['action_type']) ? $banner['action_type'] : 'none';
+    $banner['action_value'] = is_string($banner['action_value']) ? $banner['action_value'] : '';
     $banner['product_ids'] = is_string($banner['product_ids']) ? $banner['product_ids'] : '';
     return $banner;
 }
@@ -56,7 +72,31 @@ function dms_app_home_banner_sanitize($input) {
     $clean['subtitle'] = isset($input['subtitle']) ? (function_exists('sanitize_text_field') ? sanitize_text_field(function_exists('wp_unslash') ? wp_unslash($input['subtitle']) : $input['subtitle']) : $input['subtitle']) : '';
     $clean['button_label'] = isset($input['button_label']) ? (function_exists('sanitize_text_field') ? sanitize_text_field(function_exists('wp_unslash') ? wp_unslash($input['button_label']) : $input['button_label']) : $input['button_label']) : '';
     $clean['button_link'] = isset($input['button_link']) ? (function_exists('esc_url_raw') ? esc_url_raw(function_exists('wp_unslash') ? wp_unslash($input['button_link']) : $input['button_link']) : $input['button_link']) : '';
+    $allowed_actions = array('none', 'category', 'brand', 'product', 'search', 'internalRoute', 'externalUrl');
+    $action_type = isset($input['action_type']) ? (string) $input['action_type'] : 'none';
+    $clean['action_type'] = in_array($action_type, $allowed_actions, true) ? $action_type : 'none';
+    $action_value = isset($input['action_value']) ? (string) $input['action_value'] : '';
+    $clean['action_value'] = $clean['action_type'] === 'externalUrl'
+        ? esc_url_raw($action_value)
+        : sanitize_text_field($action_value);
     $clean['product_ids'] = isset($input['product_ids']) ? (function_exists('sanitize_text_field') ? sanitize_text_field(function_exists('wp_unslash') ? wp_unslash($input['product_ids']) : $input['product_ids']) : $input['product_ids']) : '';
+    $clean['show_title'] = array_key_exists('show_title', $input) ? (!empty($input['show_title']) ? 1 : 0) : 1;
+    $clean['show_subtitle'] = array_key_exists('show_subtitle', $input) ? (!empty($input['show_subtitle']) ? 1 : 0) : 1;
+    $clean['show_button'] = array_key_exists('show_button', $input) ? (!empty($input['show_button']) ? 1 : 0) : 1;
+    $allowed_alignments = array('start', 'center', 'end');
+    $content_alignment = sanitize_key((string) ($input['content_alignment'] ?? 'start'));
+    $clean['content_alignment'] = in_array($content_alignment, $allowed_alignments, true) ? $content_alignment : 'start';
+    $allowed_vertical_alignments = array('top', 'center', 'bottom');
+    $vertical_alignment = sanitize_key((string) ($input['content_vertical_alignment'] ?? 'center'));
+    $clean['content_vertical_alignment'] = in_array($vertical_alignment, $allowed_vertical_alignments, true) ? $vertical_alignment : 'center';
+    $image_fit = sanitize_key((string) ($input['image_fit'] ?? 'cover'));
+    $clean['image_fit'] = in_array($image_fit, array('cover', 'contain'), true) ? $image_fit : 'cover';
+    $clean['overlay_opacity'] = max(0, min(100, intval($input['overlay_opacity'] ?? 60)));
+    foreach (array('title_color', 'subtitle_color', 'button_background_color', 'button_text_color') as $color_key) {
+        $fallback = $color_key === 'button_background_color' ? '#D31225' : '#FFFFFF';
+        $color = sanitize_hex_color((string) ($input[$color_key] ?? $fallback));
+        $clean[$color_key] = $color ?: $fallback;
+    }
     return $clean;
 }
 }
@@ -90,6 +130,8 @@ function dms_app_home_banner_admin_payload() {
         'subtitle' => (string) ($banner['subtitle'] ?? ''),
         'button_label' => (string) ($banner['button_label'] ?? ''),
         'button_link' => (string) ($banner['button_link'] ?? ''),
+        'action_type' => (string) ($banner['action_type'] ?? 'none'),
+        'action_value' => (string) ($banner['action_value'] ?? ''),
         'product_ids' => array_map('intval', array_filter(array_map('trim', explode(',', (string) ($banner['product_ids'] ?? ''))))),
     );
 }
@@ -293,7 +335,8 @@ function dms_app_home_banner_register_menu() {
     }
 }
 }
-add_action('admin_menu', 'dms_app_home_banner_register_menu', 30);
+// The legacy WordPress banner screen is intentionally not registered.
+// Flutter Admin is the production UI for the canonical home-banners contract.
 
 if (!function_exists('dms_app_home_banner_render_page')) {
 function dms_app_home_banner_render_page() {
@@ -363,7 +406,10 @@ add_action('admin_enqueue_scripts', 'dms_app_home_banner_admin_assets');
 
 if (!function_exists('dms_app_home_banner_rest_response')) {
 function dms_app_home_banner_rest_response() {
-    $banner = dms_app_home_banner_get();
+    $canonical = function_exists('dms_app_home_banners_get') ? dms_app_home_banners_get() : array('items' => array());
+    $banner = !empty($canonical['items'][0]) && is_array($canonical['items'][0])
+        ? $canonical['items'][0]
+        : array('enabled' => false);
     if (empty($banner['enabled'])) {
         return array('enabled' => false);
     }
@@ -386,7 +432,11 @@ function dms_app_home_banner_rest_response() {
         'subtitle' => $banner['subtitle'],
         'button_label' => $banner['button_label'],
         'button_link' => $banner['button_link'],
-        'product_ids' => array_map('intval', array_filter(explode(',', $banner['product_ids'])))
+        'action_type' => (string) ($banner['action_type'] ?? 'none'),
+        'action_value' => (string) ($banner['action_value'] ?? ''),
+        'product_ids' => is_array($banner['product_ids'] ?? null)
+            ? array_values(array_map('intval', $banner['product_ids']))
+            : array_map('intval', array_filter(explode(',', (string) ($banner['product_ids'] ?? ''))))
     );
 }
 }
@@ -399,6 +449,92 @@ if (function_exists('add_action')) {
                 'callback' => 'dms_app_home_banner_rest_response',
                 'permission_callback' => '__return_true'
             ));
+            register_rest_route('dms/v1', '/home-banners', array(
+                'methods' => 'GET',
+                'callback' => 'dms_app_home_banners_rest_response',
+                'permission_callback' => '__return_true'
+            ));
         }
     });
+}
+
+if (!function_exists('dms_app_home_banner_item_sanitize')) {
+function dms_app_home_banner_item_sanitize($item, $index = 0) {
+    $item = is_array($item) ? $item : array();
+    $legacy = dms_app_home_banner_sanitize($item);
+    $product_ids = isset($item['product_ids']) && is_array($item['product_ids'])
+        ? array_values(array_filter(array_map('absint', $item['product_ids'])))
+        : array_values(array_filter(array_map('absint', explode(',', (string) ($legacy['product_ids'] ?? '')))));
+    return array_merge($legacy, array(
+        'id' => sanitize_text_field((string) ($item['id'] ?? ('banner-' . ($index + 1)))),
+        'sort_order' => isset($item['sort_order']) ? intval($item['sort_order']) : $index,
+        'starts_at' => sanitize_text_field((string) ($item['starts_at'] ?? '')),
+        'ends_at' => sanitize_text_field((string) ($item['ends_at'] ?? '')),
+        'product_ids' => $product_ids,
+        'updated_at' => current_time('c'),
+    ));
+}
+}
+
+if (!function_exists('dms_app_home_banners_get')) {
+function dms_app_home_banners_get() {
+    $stored = get_option(DMS_APP_HOME_BANNERS_OPTION, null);
+    $items = is_array($stored) && isset($stored['items']) && is_array($stored['items']) ? $stored['items'] : array();
+    if (!is_array($stored)) {
+        $legacy = dms_app_home_banner_admin_payload();
+        $legacy['id'] = 'legacy-home-banner';
+        $legacy['sort_order'] = 0;
+        $items = array($legacy);
+    }
+    usort($items, function($a, $b) { return intval($a['sort_order'] ?? 0) <=> intval($b['sort_order'] ?? 0); });
+    return array(
+        'items' => array_values($items),
+        'updated_at' => (string) ($stored['updated_at'] ?? ''),
+        'revision' => (string) ($stored['revision'] ?? ''),
+    );
+}
+}
+
+if (!function_exists('dms_app_home_banners_save')) {
+function dms_app_home_banners_save($input) {
+    $raw_items = is_array($input) && isset($input['items']) && is_array($input['items']) ? $input['items'] : array();
+    $items = array();
+    foreach (array_slice($raw_items, 0, 30) as $index => $item) {
+        $items[] = dms_app_home_banner_item_sanitize($item, $index);
+    }
+    $revision = wp_generate_uuid4();
+    foreach ($items as &$item) {
+        $item['revision'] = $revision;
+    }
+    unset($item);
+    $saved = array(
+        'items' => $items,
+        'updated_at' => current_time('c'),
+        'revision' => $revision,
+    );
+    update_option(DMS_APP_HOME_BANNERS_OPTION, $saved, false);
+    if (!empty($items)) {
+        $legacy = $items[0];
+        if (is_array($legacy['product_ids'])) $legacy['product_ids'] = implode(',', $legacy['product_ids']);
+        dms_app_home_banner_save($legacy);
+    }
+    if (function_exists('lpco_dms_clear_catalog_cache')) {
+        lpco_dms_clear_catalog_cache('home_banners_updated', 0);
+    }
+    return $saved;
+}
+}
+
+if (!function_exists('dms_app_home_banners_rest_response')) {
+function dms_app_home_banners_rest_response() {
+    $data = dms_app_home_banners_get();
+    $now = current_time('timestamp');
+    $data['items'] = array_values(array_filter($data['items'], function($item) use ($now) {
+        if (empty($item['enabled'])) return false;
+        $starts = !empty($item['starts_at']) ? strtotime($item['starts_at']) : 0;
+        $ends = !empty($item['ends_at']) ? strtotime($item['ends_at']) : 0;
+        return (!$starts || $starts <= $now) && (!$ends || $ends >= $now);
+    }));
+    return $data;
+}
 }

@@ -1,4 +1,6 @@
 <?php
+namespace DMS\Ecom;
+
 /**
  * Validation Module - DMS Ecom
  * التحقق من البيانات المدخلة
@@ -7,8 +9,6 @@
 if (!defined('ABSPATH')) {
     exit;
 }
-
-namespace DMS\Ecom;
 
 class Validator {
     /**

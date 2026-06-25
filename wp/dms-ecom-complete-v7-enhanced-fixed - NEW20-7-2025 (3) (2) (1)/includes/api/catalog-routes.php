@@ -16,6 +16,15 @@ add_action('rest_api_init', function () {
         'permission_callback' => 'dms_permission_guest_or_auth',
     ));
 
+    register_rest_route('dms/v1', '/products/barcode/(?P<barcode>[^/]+)', array(
+        'methods' => 'GET',
+        'callback' => 'dms_get_product_by_barcode',
+        'permission_callback' => 'dms_permission_guest_or_auth',
+        'args' => array(
+            'barcode' => array('sanitize_callback' => 'sanitize_text_field'),
+        ),
+    ));
+
     register_rest_route('dms/v1', '/catalog-version', array(
         'methods' => 'GET',
         'callback' => 'dms_get_catalog_version',
@@ -58,6 +67,21 @@ add_action('rest_api_init', function () {
         'methods' => 'GET',
         'callback' => 'dms_get_brands_auth',
         'permission_callback' => 'dms_permission_guest_or_auth',
+    ));
+
+    register_rest_route('dms/v1', '/brands-categories', array(
+        'methods' => 'GET',
+        'callback' => 'dms_get_brands_categories',
+        'permission_callback' => 'dms_permission_guest_or_auth',
+    ));
+
+    register_rest_route('dms/v1', '/brand-categories', array(
+        'methods' => 'GET',
+        'callback' => 'dms_get_brand_categories',
+        'permission_callback' => 'dms_permission_guest_or_auth',
+        'args' => array(
+            'brand_slug' => array('sanitize_callback' => 'sanitize_title'),
+        ),
     ));
 
     register_rest_route('dms/v1', '/home-by-category', array(

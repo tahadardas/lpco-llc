@@ -20,7 +20,11 @@ function lpco_app_layout_config_defaults() {
         'brands' => array(),
         'hidden_categories' => array(),
         'hidden_brands' => array(),
+        'slider_products' => array(),
         'featured_products' => array(),
+        'latest_products' => array(),
+        'latest_mode' => 'auto',
+        'revision' => '',
         'updated_at' => ''
     );
 }
@@ -55,7 +59,11 @@ function lpco_app_layout_config_get() {
     $config['brands'] = lpco_app_layout_normalize_ids($config['brands']);
     $config['hidden_categories'] = lpco_app_layout_normalize_ids($config['hidden_categories']);
     $config['hidden_brands'] = lpco_app_layout_normalize_ids($config['hidden_brands']);
+    $config['slider_products'] = lpco_app_layout_normalize_ids($config['slider_products']);
     $config['featured_products'] = lpco_app_layout_normalize_ids($config['featured_products']);
+    $config['latest_products'] = lpco_app_layout_normalize_ids($config['latest_products']);
+    $config['latest_mode'] = ($config['latest_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto';
+    $config['revision'] = isset($config['revision']) ? sanitize_text_field((string) $config['revision']) : '';
     $config['updated_at'] = isset($config['updated_at']) ? (function_exists('sanitize_text_field') ? sanitize_text_field($config['updated_at']) : $config['updated_at']) : '';
     return $config;
 }
@@ -80,14 +88,74 @@ function lpco_app_layout_config_save($input) {
     $config['hidden_brands'] = array_key_exists('hidden_brands', $input)
         ? lpco_app_layout_normalize_ids($input['hidden_brands'])
         : lpco_app_layout_normalize_ids($existing['hidden_brands'] ?? array());
+    $config['slider_products'] = array_key_exists('slider_products', $input)
+        ? lpco_app_layout_normalize_ids($input['slider_products'])
+        : lpco_app_layout_normalize_ids($existing['slider_products'] ?? array());
     $config['featured_products'] = array_key_exists('featured_products', $input)
         ? lpco_app_layout_normalize_ids($input['featured_products'])
         : lpco_app_layout_normalize_ids($existing['featured_products'] ?? array());
+    $config['latest_products'] = array_key_exists('latest_products', $input)
+        ? lpco_app_layout_normalize_ids($input['latest_products'])
+        : lpco_app_layout_normalize_ids($existing['latest_products'] ?? array());
+    $config['latest_mode'] = ($input['latest_mode'] ?? $existing['latest_mode'] ?? 'auto') === 'manual'
+        ? 'manual'
+        : 'auto';
+    $config['revision'] = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : uniqid('layout-', true);
     $config['updated_at'] = function_exists('current_time') ? current_time('c') : date('c');
     if (function_exists('update_option')) {
         update_option(LPCO_APP_LAYOUT_CONFIG_OPTION, $config, false);
     }
+    if (function_exists('lpco_app_layout_sync_term_menu_order')) {
+        lpco_app_layout_sync_term_menu_order('product_cat', $config['categories']);
+        $brand_taxonomy = function_exists('taxonomy_exists') && taxonomy_exists('product_brand')
+            ? 'product_brand'
+            : 'product_tag';
+        lpco_app_layout_sync_term_menu_order($brand_taxonomy, $config['brands']);
+    }
+    if (function_exists('lpco_dms_bump_catalog_version')) {
+        lpco_dms_bump_catalog_version('home_layout_updated');
+    }
+    if (function_exists('lpco_dms_clear_catalog_cache')) {
+        lpco_dms_clear_catalog_cache('home_layout_updated', 0);
+    }
     return $config;
+}
+}
+
+if (!function_exists('lpco_app_layout_sync_term_menu_order')) {
+/**
+ * Persist app ordering into WooCommerce term menu_order meta.
+ */
+function lpco_app_layout_sync_term_menu_order($taxonomy, $ordered_ids) {
+    if (!function_exists('update_term_meta') || !function_exists('get_terms')) {
+        return;
+    }
+    if (!is_string($taxonomy) || $taxonomy === '' || !taxonomy_exists($taxonomy)) {
+        return;
+    }
+
+    $ordered_ids = lpco_app_layout_normalize_ids($ordered_ids);
+    $position = 0;
+    foreach ($ordered_ids as $term_id) {
+        update_term_meta($term_id, 'menu_order', $position++);
+    }
+
+    $terms = get_terms(array(
+        'taxonomy' => $taxonomy,
+        'hide_empty' => false,
+        'fields' => 'ids',
+    ));
+    if (is_wp_error($terms)) {
+        return;
+    }
+
+    foreach ((array) $terms as $term_id) {
+        $term_id = absint($term_id);
+        if ($term_id <= 0 || in_array($term_id, $ordered_ids, true)) {
+            continue;
+        }
+        update_term_meta($term_id, 'menu_order', $position++);
+    }
 }
 }
 
@@ -221,9 +289,8 @@ function lpco_app_layout_register_menu() {
 }
 }
 
-if (function_exists('add_action')) {
-    add_action('admin_menu', 'lpco_app_layout_register_menu', 20);
-}
+// Flutter Admin is the production editor for lpco_app_layout_config.
+// Keep the helpers/API contract loaded, but do not expose the incomplete legacy UI.
 
 if (!function_exists('lpco_app_layout_enqueue_admin_assets')) {
 /**

@@ -128,6 +128,7 @@ class SessionExpiredEvent {
 }
 
 class SessionManager {
+  static const bool neverAutoLogout = true;
   static const Duration onlineValidationInterval = Duration(hours: 6);
   static final StreamController<SessionExpiredEvent> _sessionExpiredController =
       StreamController<SessionExpiredEvent>.broadcast();
@@ -283,7 +284,7 @@ class SessionManager {
       return inProgress;
     }
 
-    final expiration = _clearAndNotifyNetworkExpiration(statusCode);
+    final expiration = _notifyNetworkAuthorizationFailure(statusCode);
     _networkExpiration = expiration.whenComplete(() {
       _networkExpiration = null;
     });
@@ -315,8 +316,9 @@ class SessionManager {
     return elapsed >= onlineValidationInterval;
   }
 
-  Future<void> _clearAndNotifyNetworkExpiration(int statusCode) async {
-    await clear();
+  Future<void> _notifyNetworkAuthorizationFailure(int statusCode) async {
+    // A transient 401/403 must never destroy the locally persisted session.
+    // Explicit logout remains the only client-side path that clears auth data.
     _sessionExpiredController.add(SessionExpiredEvent(statusCode: statusCode));
   }
 }

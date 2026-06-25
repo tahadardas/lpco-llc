@@ -14,6 +14,7 @@ import 'package:lpco_llc/features/products/domain/catalog_visibility_policy.dart
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/utils/brand_scoped_category_resolver.dart';
 import 'package:lpco_llc/features/products/presentation/widgets/brand_quick_categories_tile.dart';
+import 'package:lpco_llc/features/products/presentation/widgets/global_catalog_search_bar.dart';
 
 class BrandsScreen extends StatefulWidget {
   const BrandsScreen({super.key});
@@ -27,12 +28,6 @@ class _BrandsScreenState extends State<BrandsScreen> {
   final BrandScopedCategoryResolver _brandCategoryResolver =
       const BrandScopedCategoryResolver();
   final RefreshController _refreshController = RefreshController();
-
-  double _topContentPadding(BuildContext context) {
-    return MediaQuery.paddingOf(context).top +
-        BrandAppBar.toolbarHeightValue +
-        14;
-  }
 
   @override
   void initState() {
@@ -75,14 +70,17 @@ class _BrandsScreenState extends State<BrandsScreen> {
       return visibleBrands;
     }
     return visibleBrands
-        .where((brand) => brand.name.toLowerCase().contains(query))
+        .where(
+          (brand) =>
+              brand.name.toLowerCase().contains(query) ||
+              brand.slug.toLowerCase().contains(query),
+        )
         .toList(growable: false);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
       appBar: BrandAppBar(
         title: 'العلامات التجارية',
         showMenu: true,
@@ -122,168 +120,183 @@ class _BrandsScreenState extends State<BrandsScreen> {
               failed: Icon(Icons.error_outline, color: AppColors.error),
             ),
             child: CustomScrollView(
-            slivers: <Widget>[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    14,
-                    _topContentPadding(context),
-                    14,
-                    10,
-                  ),
-                  child: TextField(
-                    controller: _searchController,
-                    textInputAction: TextInputAction.search,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      hintText: 'ابحث داخل العلامات',
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      suffixIcon: _searchController.text.trim().isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Icons.close_rounded),
-                              tooltip: 'مسح',
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() {});
-                              },
-                            ),
+              slivers: <Widget>[
+                SliverToBoxAdapter(
+                  child: GlobalCatalogSearchBar(
+                    padding: EdgeInsets.fromLTRB(14, 14, 14, 4),
+                    onSearch: (query) => context.push(
+                      query.isEmpty
+                          ? AppRoutePaths.catalogSearchEntry(
+                              entry: 'brands',
+                              basePath: AppRoutePaths.brandsCatalog,
+                            )
+                          : AppRoutePaths.searchUrl(query: query),
                     ),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: _BrandsHeaderBlock(
-                  onGoHome: () => context.go(AppRoutePaths.home),
-                ),
-              ),
-              if (visibleBrands.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _EmptyBrowseState(
-                    icon: Icons.sell_rounded,
-                    title: 'لا توجد علامات متاحة',
-                    subtitle: 'سيتم عرض العلامات التجارية هنا عند توفرها.',
-                    ctaLabel: 'العودة للرئيسية',
-                    onPressed: () => context.go(AppRoutePaths.home),
-                  ),
-                )
-              else if (filtered.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _EmptyBrowseState(
-                    icon: Icons.search_off_rounded,
-                    title: 'لا توجد نتائج مطابقة',
-                    subtitle: 'غيّر عبارة البحث أو امسحها لعرض كل العلامات.',
-                    ctaLabel: 'مسح البحث',
-                    onPressed: () {
-                      _searchController.clear();
-                      setState(() {});
-                    },
-                  ),
-                )
-              else ...<Widget>[
                 SliverToBoxAdapter(
-                  child: _TopBrandsStrip(
-                    brands: visibleBrands.take(12).toList(growable: false),
-                    onTapBrand: (brand) =>
-                        context.push(AppRoutePaths.brandUrl(brand.slug)),
-                  ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                  sliver: SliverToBoxAdapter(
-                    child: _SimpleBrandListTile(
-                      title: 'كل العلامات',
-                      subtitle: '${visibleBrands.length} علامة',
-                      onTap: () => context.push(
-                        AppRoutePaths.catalogListing(
-                          basePath: AppRoutePaths.brandsCatalog,
-                          type: 'brand',
-                          title: 'كل العلامات',
-                        ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(14, 6, 14, 10),
+                    child: TextField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'ابحث داخل العلامات',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: _searchController.text.trim().isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.close_rounded),
+                                tooltip: 'مسح',
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                },
+                              ),
                       ),
                     ),
                   ),
                 ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 22),
-                  sliver: SliverList.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final brand = filtered[index];
-                      final normalizedBrandSlug =
-                          BrandScopedCategoryResolver.normalizeBrandKey(
-                            brand.slug,
-                          );
-                      final productDerivedCategoryIds = context
-                          .read<ProductCubit>()
-                          .getActiveCategoryIdsForBrand(brand.slug);
-                      final rawResolvedMenu = _brandCategoryResolver.resolve(
-                        brand: brand,
-                        brandSlug: brand.slug,
-                        brandTitle: brand.name,
-                        categories: state.categories,
-                        productDerivedCategoryIds: productDerivedCategoryIds,
-                      );
-                      final fallbackAvailableCategoryIds =
-                          rawResolvedMenu?.items
-                              .where((item) => item.category.count > 0)
-                              .map((item) => item.categoryId)
-                              .toSet() ??
-                          const <int>{};
-                      final finalAvailableCategoryIds = <int>{
-                        ...fallbackAvailableCategoryIds,
-                        ...productDerivedCategoryIds,
-                      };
-                      final filteredMenu = rawResolvedMenu == null
-                          ? null
-                          : _brandCategoryResolver.filterByAvailableCategories(
-                              menu: rawResolvedMenu,
-                              availableCategoryIds: finalAvailableCategoryIds,
-                            );
-                      final displayedMenu =
-                          filteredMenu ?? rawResolvedMenu;
-                      _logBrandCategoryResolution(
-                        brandSlug: normalizedBrandSlug,
-                        brandName: brand.name,
-                        rawMenu: rawResolvedMenu,
-                        productDerivedCategoryIds: productDerivedCategoryIds,
-                        fallbackAvailableCategoryIds:
-                            fallbackAvailableCategoryIds,
-                        finalAvailableCategoryIds: finalAvailableCategoryIds,
-                        displayedMenu: displayedMenu,
-                      );
-                      return BrandQuickCategoriesTile(
-                        brandSlug: brand.slug,
-                        title: brand.name,
-                        subtitle: '${brand.count} منتج',
-                        imageUrl: brand.imageUrl,
-                        resolvedCuratedMenu: displayedMenu,
-                        onTapBrand: () {
-                          context.push(
-                            AppRoutePaths.brandUrl(normalizedBrandSlug),
-                          );
-                        },
-                        onTapCategory: displayedMenu == null
-                            ? null
-                            : (cat) => context.push(
-                                AppRoutePaths.brandUrl(
-                                  normalizedBrandSlug,
-                                  title: '${brand.name} - ${cat.name}',
-                                  curatedCategoryId: cat.id,
-                                  curatedCategorySlug: cat.slug,
-                                  curatedCategoryLabel: cat.name,
-                                ),
-                              ),
-                      );
-                    },
+                SliverToBoxAdapter(
+                  child: _BrandsHeaderBlock(
+                    onGoHome: () => context.go(AppRoutePaths.home),
                   ),
                 ),
+                if (visibleBrands.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyBrowseState(
+                      icon: Icons.sell_rounded,
+                      title: 'لا توجد علامات متاحة',
+                      subtitle: 'سيتم عرض العلامات التجارية هنا عند توفرها.',
+                      ctaLabel: 'العودة للرئيسية',
+                      onPressed: () => context.go(AppRoutePaths.home),
+                    ),
+                  )
+                else if (filtered.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyBrowseState(
+                      icon: Icons.search_off_rounded,
+                      title: 'لا توجد نتائج مطابقة',
+                      subtitle: 'غيّر عبارة البحث أو امسحها لعرض كل العلامات.',
+                      ctaLabel: 'مسح البحث',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {});
+                      },
+                    ),
+                  )
+                else ...<Widget>[
+                  SliverToBoxAdapter(
+                    child: _TopBrandsStrip(
+                      brands: visibleBrands.take(12).toList(growable: false),
+                      onTapBrand: (brand) =>
+                          context.push(AppRoutePaths.brandUrl(brand.slug)),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                    sliver: SliverToBoxAdapter(
+                      child: _SimpleBrandListTile(
+                        title: 'كل العلامات',
+                        subtitle: '${visibleBrands.length} علامة',
+                        onTap: () => context.push(
+                          AppRoutePaths.catalogListing(
+                            basePath: AppRoutePaths.brandsCatalog,
+                            type: 'brand',
+                            title: 'كل العلامات',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 22),
+                    sliver: SliverList.separated(
+                      itemCount: filtered.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final brand = filtered[index];
+                        final normalizedBrandSlug =
+                            BrandScopedCategoryResolver.normalizeBrandKey(
+                              brand.slug,
+                            );
+                        final productDerivedCategoryIds = context
+                            .read<ProductCubit>()
+                            .getActiveCategoryIdsForBrand(brand.slug);
+                        final rawResolvedMenu = _brandCategoryResolver.resolve(
+                          brand: brand,
+                          brandSlug: brand.slug,
+                          brandTitle: brand.name,
+                          categories: state.categories,
+                          productDerivedCategoryIds: productDerivedCategoryIds,
+                        );
+                        final fallbackAvailableCategoryIds =
+                            rawResolvedMenu?.items
+                                .where((item) => item.category.count > 0)
+                                .map((item) => item.categoryId)
+                                .toSet() ??
+                            const <int>{};
+                        final finalAvailableCategoryIds = <int>{
+                          ...fallbackAvailableCategoryIds,
+                          ...productDerivedCategoryIds,
+                        };
+                        final hasApiCategories =
+                            brand.linkedCategories.isNotEmpty ||
+                            brand.linkedCategoryIds.isNotEmpty ||
+                            brand.linkedCategorySlugs.isNotEmpty;
+                        final filteredMenu = rawResolvedMenu == null
+                            ? null
+                            : _brandCategoryResolver
+                                  .filterByAvailableCategories(
+                                    menu: rawResolvedMenu,
+                                    availableCategoryIds:
+                                        finalAvailableCategoryIds,
+                                  );
+                        final displayedMenu = hasApiCategories
+                            ? rawResolvedMenu
+                            : (filteredMenu ?? rawResolvedMenu);
+                        _logBrandCategoryResolution(
+                          brandSlug: normalizedBrandSlug,
+                          brandName: brand.name,
+                          rawMenu: rawResolvedMenu,
+                          productDerivedCategoryIds: productDerivedCategoryIds,
+                          fallbackAvailableCategoryIds:
+                              fallbackAvailableCategoryIds,
+                          finalAvailableCategoryIds: finalAvailableCategoryIds,
+                          displayedMenu: displayedMenu,
+                        );
+                        return BrandQuickCategoriesTile(
+                          brandSlug: brand.slug,
+                          title: brand.name,
+                          subtitle: '${brand.count} منتج',
+                          imageUrl: brand.imageUrl,
+                          resolvedCuratedMenu: displayedMenu,
+                          onTapBrand: () {
+                            context.push(
+                              AppRoutePaths.brandUrl(normalizedBrandSlug),
+                            );
+                          },
+                          onTapCategory: displayedMenu == null
+                              ? null
+                              : (cat) => context.push(
+                                  AppRoutePaths.brandUrl(
+                                    normalizedBrandSlug,
+                                    title: '${brand.name} - ${cat.name}',
+                                    curatedCategoryId: cat.id,
+                                    curatedCategorySlug: cat.slug,
+                                    curatedCategoryLabel: cat.name,
+                                  ),
+                                ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ],
-            ],
             ),
           );
         },
@@ -315,12 +328,8 @@ class _BrandsScreenState extends State<BrandsScreen> {
             .toList(growable: false) ??
         const <String>[];
 
-    debugPrint(
-      '[BRAND_CATEGORY_LINK] brand="$brandName" slug=$brandSlug',
-    );
-    debugPrint(
-      '[BRAND_CATEGORY_LINK]   rawResolvedMenu slugs: $rawSlugs',
-    );
+    debugPrint('[BRAND_CATEGORY_LINK] brand="$brandName" slug=$brandSlug');
+    debugPrint('[BRAND_CATEGORY_LINK]   rawResolvedMenu slugs: $rawSlugs');
     debugPrint(
       '[BRAND_CATEGORY_LINK]   productDerivedCategoryIds: $productDerivedCategoryIds',
     );
@@ -337,7 +346,7 @@ class _BrandsScreenState extends State<BrandsScreen> {
 
   Widget _skeleton() {
     return ListView.separated(
-      padding: EdgeInsets.fromLTRB(14, _topContentPadding(context), 14, 22),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
       itemCount: 7,
       separatorBuilder: (context, index) => const SizedBox(height: 10),
       itemBuilder: (context, index) => const SkeletonBlock(height: 78),

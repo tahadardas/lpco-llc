@@ -6,11 +6,9 @@ class AppRefreshCoordinator {
   final ProductRepository _repository;
   final DioClient _dioClient;
 
-  AppRefreshCoordinator({
-    ProductRepository? repository,
-    DioClient? dioClient,
-  }) : _repository = repository ?? ProductRepository(),
-       _dioClient = dioClient ?? DioClient();
+  AppRefreshCoordinator({ProductRepository? repository, DioClient? dioClient})
+    : _repository = repository ?? ProductRepository(),
+      _dioClient = dioClient ?? DioClient();
 
   Future<CatalogRefreshResult> refreshCatalog({
     bool forceRemote = false,
@@ -76,7 +74,7 @@ class AppRefreshCoordinator {
     String? errorMessage;
 
     try {
-      await _repository.getHomeBannerData(
+      await _repository.getHomeBannersData(
         guest: guest,
         forceRefresh: forceRemote,
       );
@@ -136,14 +134,8 @@ class AppRefreshCoordinator {
       await Future.wait([
         _repository.getCategories(guest: guest, forceRefresh: forceRemote),
         _repository.getBrands(guest: guest, forceRefresh: forceRemote),
-        _repository.getHomeBannerData(
-          guest: guest,
-          forceRefresh: forceRemote,
-        ),
-        _repository.getHomeBannersData(
-          guest: guest,
-          forceRefresh: forceRemote,
-        ),
+        _repository.getHomeBannersData(guest: guest, forceRefresh: forceRemote),
+        _repository.getHomeBannersData(guest: guest, forceRefresh: forceRemote),
       ]);
     } catch (e) {
       errorMessage = 'فشل تحديث البيانات: $e';

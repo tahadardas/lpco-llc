@@ -21,20 +21,8 @@ if (!defined('DMS_APP_THEME_OPTION')) {
     define('DMS_APP_THEME_OPTION', 'dms_app_theme_settings');
 }
 
-if (function_exists('add_action')) {
-    add_action('admin_menu', function () {
-        if (function_exists('add_submenu_page')) {
-            add_submenu_page(
-                'dms-app-main',
-                'تخطيط الصفحة الرئيسية',
-                'تخطيط الصفحة الرئيسية',
-                'manage_woocommerce',
-                'dms-app-home-layout',
-                'dms_app_home_layout_render_admin'
-            );
-        }
-    });
-}
+// The section-builder/theme WordPress screen is intentionally hidden because
+// the current Flutter app does not render its dynamic sections or remote theme.
 
 if (!function_exists('dms_app_home_layout_section_labels')) {
     function dms_app_home_layout_section_labels() {
@@ -685,7 +673,11 @@ if (function_exists('add_action')) {
                         : array(
                             'categories' => array(),
                             'brands' => array(),
+                            'slider_products' => array(),
                             'featured_products' => array(),
+                            'latest_products' => array(),
+                            'latest_mode' => 'auto',
+                            'revision' => '',
                             'updated_at' => ''
                         );
                     $payload = array(

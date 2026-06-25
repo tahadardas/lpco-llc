@@ -85,8 +85,8 @@ class AuthCubit extends Cubit<AuthState> {
        _appLockManager = appLockManager ?? AppLockManager(),
        super(const AuthInitial()) {
     _sessionExpiredSubscription = _sessionManager.expiredEvents.listen((_) {
-      _backgroundedAt = null;
-      _emitSafe(const Unauthenticated());
+      // Authorization failures are request-scoped. Keep the authenticated
+      // state and let the calling feature present its own retry/permission UI.
     });
     Future.microtask(checkAuthStatus);
   }
@@ -116,6 +116,14 @@ class AuthCubit extends Cubit<AuthState> {
       _backgroundedAt = null;
       _emitSafe(const Unauthenticated());
     } catch (_) {
+      final cachedUser = await _authRepository.getStoredUser();
+      if (cachedUser != null && !cachedUser.isGuest) {
+        await _resolveAuthenticatedState(
+          cachedUser,
+          enforceSecuritySetup: false,
+        );
+        return;
+      }
       _backgroundedAt = null;
       _emitSafe(const Unauthenticated());
     }

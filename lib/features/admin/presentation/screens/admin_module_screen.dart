@@ -32,18 +32,14 @@ class AdminModuleScreen extends StatelessWidget {
         return const AdminNotificationsScreen();
       case 'home-banner':
         return const AdminHomeBannerScreen();
-      case 'home-layout':
-        return const AdminHomeLayoutScreen();
-      case 'app-theme':
-        return const AdminAppThemeScreen();
-      case 'popup-config':
-        return const AdminPopupConfigScreen();
       case 'products':
         return const AdminProductsScreen();
       case 'reviews':
         return const AdminReviewsScreen();
       case 'ordering':
         return const AdminOrderingScreen();
+      case 'brand-category-layout':
+        return const AdminBrandCategoryLayoutScreen();
       default:
         return const AdminModuleScaffold(
           title: 'وحدة غير معروفة',

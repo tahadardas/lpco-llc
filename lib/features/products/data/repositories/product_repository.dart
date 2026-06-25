@@ -8,7 +8,6 @@ import 'package:lpco_llc/core/network/api_contract.dart';
 import 'package:lpco_llc/core/network/dio_client.dart';
 import 'package:lpco_llc/core/network/reachability_service.dart';
 import 'package:lpco_llc/core/storage/storage_service.dart';
-import 'package:lpco_llc/core/utils/text_sanitizer.dart';
 import 'package:lpco_llc/features/products/data/models/brand_model.dart';
 import 'package:lpco_llc/features/products/data/models/category_model.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
@@ -161,7 +160,9 @@ class ProductRepository {
       final payload = response.data;
       if (payload is! Map) {
         if (kDebugMode) {
-          debugPrint('[CATALOG_REVISION] invalid payload type: ${payload.runtimeType}');
+          debugPrint(
+            '[CATALOG_REVISION] invalid payload type: ${payload.runtimeType}',
+          );
         }
         return false;
       }
@@ -201,7 +202,8 @@ class ProductRepository {
       await _storageService.saveSyncMeta(metaKey, <String, dynamic>{
         'catalog_revision': revision,
         'products_updated_at': (map['products_updated_at'] ?? '').toString(),
-        'categories_updated_at': (map['categories_updated_at'] ?? '').toString(),
+        'categories_updated_at': (map['categories_updated_at'] ?? '')
+            .toString(),
         'brands_updated_at': (map['brands_updated_at'] ?? '').toString(),
         'home_updated_at': (map['home_updated_at'] ?? '').toString(),
         'synced_at': DateTime.now().toUtc().toIso8601String(),
@@ -275,7 +277,9 @@ class ProductRepository {
 
     if (reachability.status == ReachabilityStatus.offline) {
       if (kDebugMode && forceRefresh) {
-        debugPrint('[REPO] getProductsPage offline, using local fallback despite forceRefresh');
+        debugPrint(
+          '[REPO] getProductsPage offline, using local fallback despite forceRefresh',
+        );
       }
       final fallback = _loadProductsFromLocal(
         scope: scope,
@@ -309,6 +313,7 @@ class ProductRepository {
         'include_gallery': 1,
       };
       if (forceRefresh) {
+        query['force_refresh'] = 1;
         query['_t'] = DateTime.now().millisecondsSinceEpoch;
       }
       if (_pricingRev.isNotEmpty) {
@@ -466,7 +471,9 @@ class ProductRepository {
 
     if (reachability.status == ReachabilityStatus.offline) {
       if (kDebugMode && forceRefresh) {
-        debugPrint('[REPO] searchProductsWithFiltersPage offline, using local fallback despite forceRefresh');
+        debugPrint(
+          '[REPO] searchProductsWithFiltersPage offline, using local fallback despite forceRefresh',
+        );
       }
       final fallback = _searchProductsFromLocal(scope: scope, query: query);
       return CatalogProductsPage(
@@ -482,7 +489,9 @@ class ProductRepository {
 
     try {
       if (kDebugMode && forceRefresh) {
-        debugPrint('[REPO] searchProductsWithFiltersPage forceRefresh=true search="${query.search}"');
+        debugPrint(
+          '[REPO] searchProductsWithFiltersPage forceRefresh=true search="${query.search}"',
+        );
       }
       final params = <String, dynamic>{
         ...query.toQueryParameters(),
@@ -492,6 +501,7 @@ class ProductRepository {
         if (guest) 'guest': 1,
       };
       if (forceRefresh) {
+        params['force_refresh'] = 1;
         params['_t'] = DateTime.now().millisecondsSinceEpoch;
       }
       if (_pricingRev.isNotEmpty) {
@@ -607,7 +617,49 @@ class ProductRepository {
     }
   }
 
-  Future<ProductModel?> getProductById(int id, {bool guest = false}) async {
+  Future<List<CategoryModel>> getBrandCategories({
+    required String brandSlug,
+    bool guest = false,
+    bool forceRefresh = false,
+  }) async {
+    final slug = brandSlug.trim();
+    if (slug.isEmpty) return <CategoryModel>[];
+
+    final response = await _dioClient.dio.get(
+      '/dms/v1/brand-categories',
+      queryParameters: <String, dynamic>{
+        'brand_slug': slug,
+        ...await _userScopeQuery(guest: guest),
+        if (guest) 'guest': 1,
+        if (forceRefresh) 'force_refresh': 1,
+        if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+      },
+      options: _requestOptions(
+        skipAuth: guest,
+        cachePolicy: CachePolicy.noCache,
+      ),
+    );
+
+    final payload = response.data;
+    final rawCategories = payload is Map
+        ? (payload['categories'] as List? ??
+              (payload['data'] is Map
+                  ? (payload['data']['categories'] as List?)
+                  : null) ??
+              const <dynamic>[])
+        : const <dynamic>[];
+    return rawCategories
+        .whereType<Map>()
+        .map((item) => CategoryModel.fromJson(Map<String, dynamic>.from(item)))
+        .where((category) => category.id > 0 && category.name.trim().isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<ProductModel?> getProductById(
+    int id, {
+    bool guest = false,
+    bool forceRefresh = false,
+  }) async {
     final scope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
     if (reachability.status == ReachabilityStatus.offline) {
@@ -626,6 +678,7 @@ class ProductRepository {
         <int>[id],
         guest: guest,
         includeGallery: true,
+        forceRefresh: forceRefresh,
       );
       if (products.isNotEmpty) return products.first;
     } catch (_) {
@@ -706,6 +759,139 @@ class ProductRepository {
     }
   }
 
+  Future<ProductModel?> getProductByBarcodeExact(
+    String code, {
+    bool guest = false,
+  }) async {
+    final barcode = code.trim();
+    if (barcode.isEmpty) return null;
+
+    final localScope = await _scopeFor(guest: guest);
+    final reachability = _reachabilityService.current;
+    if (reachability.status == ReachabilityStatus.offline) {
+      return _findBarcodeInLocalCache(scope: localScope, barcode: barcode);
+    }
+
+    try {
+      final query = <String, dynamic>{
+        'barcode': barcode,
+        'exact_barcode': 1,
+        'force_refresh': 1,
+        '_t': DateTime.now().millisecondsSinceEpoch,
+        'envelope': 1,
+        'include_gallery': 1,
+        'per_page': 5,
+        ...await _userScopeQuery(guest: guest),
+        if (guest) 'guest': 1,
+      };
+      if (_pricingRev.isNotEmpty) {
+        query['pricing_rev'] = _pricingRev;
+      }
+
+      final response = await _dioClient.dio.get(
+        '/dms/v1/products-plus',
+        queryParameters: query,
+        options: _requestOptions(
+          skipAuth: guest,
+          cachePolicy: CachePolicy.noCache,
+        ),
+      );
+      final rawProducts = _extractProductsData(response.data);
+      if (rawProducts.isEmpty) {
+        return null;
+      }
+      await _catalogLocalStore.cacheProducts(
+        scope: localScope,
+        products: rawProducts,
+      );
+      return _tryParseProduct(
+        rawProducts.first,
+        context: 'getProductByBarcodeExact:remote',
+      );
+    } catch (_) {
+      return _findBarcodeInLocalCache(scope: localScope, barcode: barcode);
+    }
+  }
+
+  ProductModel? _findBarcodeInLocalCache({
+    required String scope,
+    required String barcode,
+  }) {
+    final candidates = _barcodeMatchCandidates(barcode);
+    if (candidates.isEmpty) return null;
+
+    for (final raw in _catalogLocalStore.getProducts(
+      scope: scope,
+      page: 1,
+      perPage: 3000,
+    )) {
+      final product = _tryParseProduct(raw, context: 'barcode:local-cache');
+      if (product == null) continue;
+      if (_productMatchesBarcode(product, candidates)) {
+        return product;
+      }
+    }
+    return null;
+  }
+
+  bool _productMatchesBarcode(ProductModel product, Set<String> scanned) {
+    if (_barcodeMatchCandidates(product.sku).intersection(scanned).isNotEmpty) {
+      return true;
+    }
+    final barcodeValues = <String>[
+      product.barcode1,
+      product.barcode2,
+      product.barcode3,
+      product.barcode4,
+      ...product.barcodes,
+    ];
+    if (barcodeValues.any(
+      (value) =>
+          _barcodeMatchCandidates(value).intersection(scanned).isNotEmpty,
+    )) {
+      return true;
+    }
+    return product.metaData.any((item) {
+      final key = item.key.toLowerCase();
+      if (!<String>{
+        'barcode',
+        'bar_code',
+        '_barcode',
+        '_barcode_1',
+        '_barcode_2',
+        '_barcode_3',
+        '_barcode_4',
+        'ean',
+        'upc',
+        'dms_barcode',
+        '_dms_barcode',
+        'product_barcode',
+      }.contains(key)) {
+        return false;
+      }
+      return _barcodeMatchCandidates(
+        (item.value ?? '').toString(),
+      ).intersection(scanned).isNotEmpty;
+    });
+  }
+
+  Set<String> _barcodeMatchCandidates(String value) {
+    final canonical = value.trim().toLowerCase();
+    if (canonical.isEmpty) return <String>{};
+
+    final compact = canonical.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final candidates = <String>{canonical};
+    if (compact.isNotEmpty) {
+      candidates.add(compact);
+      if (compact.length == 13 && compact.startsWith('0')) {
+        candidates.add(compact.substring(1));
+      } else if (compact.length == 12) {
+        candidates.add('0$compact');
+      }
+    }
+    return candidates;
+  }
+
   Future<List<ProductModel>> getProductsByIds(
     List<int> ids, {
     bool guest = false,
@@ -719,7 +905,7 @@ class ProductRepository {
     final localScope = await _scopeFor(guest: guest);
     final reachability = _reachabilityService.current;
     if (reachability.status == ReachabilityStatus.offline) {
-      return _catalogLocalStore
+      final products = _catalogLocalStore
           .getProducts(scope: localScope, page: 1, perPage: 2000)
           .where((product) {
             final rawId = product['id'];
@@ -736,6 +922,13 @@ class ProductRepository {
           )
           .whereType<ProductModel>()
           .toList(growable: false);
+      final byId = <int, ProductModel>{
+        for (final product in products) product.id: product,
+      };
+      return ids
+          .map((id) => byId[id])
+          .whereType<ProductModel>()
+          .toList(growable: false);
     }
 
     final scopeQuery = await _userScopeQuery(guest: guest);
@@ -746,6 +939,7 @@ class ProductRepository {
       ...scopeQuery,
       if (guest) 'guest': 1,
       if (includeGallery) 'include_gallery': 1,
+      if (forceRefresh) 'force_refresh': 1,
       if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
     };
     if (_pricingRev.isNotEmpty) {
@@ -770,10 +964,17 @@ class ProductRepository {
       scope: localScope,
       products: rawProducts,
     );
-    return _toProductModels(
+    final products = _toProductModels(
       rawProducts,
       context: 'getProductsByIds:/dms/v1/products-plus',
     );
+    final byId = <int, ProductModel>{
+      for (final product in products) product.id: product,
+    };
+    return ids
+        .map((id) => byId[id])
+        .whereType<ProductModel>()
+        .toList(growable: false);
   }
 
   Future<List<CategoryModel>> getCategories({
@@ -808,6 +1009,7 @@ class ProductRepository {
           ...await _userScopeQuery(guest: guest),
           if (guest) 'guest': 1,
           if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+          if (forceRefresh) 'force_refresh': 1,
         },
         options: _requestOptions(
           skipAuth: skipAuth,
@@ -941,6 +1143,7 @@ class ProductRepository {
             ...await _userScopeQuery(guest: guest),
             if (guest) 'guest': 1,
             if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
+            if (forceRefresh) 'force_refresh': 1,
           },
           options: _requestOptions(
             skipAuth: skipAuth,
@@ -1003,6 +1206,20 @@ class ProductRepository {
                 'image_url': brand.imageUrl,
                 'linked_category_ids': brand.linkedCategoryIds,
                 'linked_category_slugs': brand.linkedCategorySlugs,
+                'categories': brand.linkedCategories
+                    .map(
+                      (category) => <String, dynamic>{
+                        'id': category.id,
+                        'name': category.name,
+                        'slug': category.slug,
+                        'parent': category.parentId,
+                        'count': category.count,
+                        'product_count': category.count,
+                        'image_url': category.imageUrl,
+                        'menu_order': category.menuOrder,
+                      },
+                    )
+                    .toList(growable: false),
                 'show_in_app': true,
                 'hidden': false,
               },
@@ -1062,26 +1279,6 @@ class ProductRepository {
     );
   }
 
-  Future<HomeBannerData> getCachedHomeBannerData({bool guest = true}) async {
-    final key = 'home_banner_${guest ? 'guest' : 'user'}';
-    final raw = _storageService.settingsBox.get(key);
-    if (raw is! String || raw.isEmpty) return const HomeBannerData.empty();
-    try {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      return HomeBannerData(
-        enabled: map['enabled'] == true,
-        imageUrl: map['image_url'] ?? '',
-        title: map['title'] ?? '',
-        subtitle: map['subtitle'] ?? '',
-        buttonLabel: map['button_label'] ?? '',
-        buttonLink: map['button_link'] ?? '',
-        productIds: _parseProductIds(map['product_ids']),
-      );
-    } catch (_) {
-      return const HomeBannerData.empty();
-    }
-  }
-
   Future<List<HomeBannerSlideData>> getCachedHomeBannersData({
     bool guest = true,
   }) async {
@@ -1117,11 +1314,13 @@ class ProductRepository {
   }) async {
     final banners = <HomeBannerSlideData>[];
 
+    var primaryEndpointSucceeded = false;
     try {
       final response = await _dioClient.dio.get(
         '/dms/v1/home-banners', // First attempt the multi-banner endpoint
         queryParameters: <String, dynamic>{
           if (guest) 'guest': 1,
+          if (forceRefresh) 'force_refresh': 1,
           if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
         },
         options: _requestOptions(
@@ -1129,6 +1328,7 @@ class ProductRepository {
           cachePolicy: CachePolicy.noCache,
         ),
       );
+      primaryEndpointSucceeded = true;
       final data = response.data;
       if (data is Map) {
         if (data.containsKey('items') && data['items'] is List) {
@@ -1159,58 +1359,29 @@ class ProductRepository {
       }
     } catch (_) {}
 
-    // Fallback to legacy single banner endpoint if the list is empty
-    if (banners.isEmpty) {
-      try {
-        final response = await _dioClient.dio.get(
-          '/dms/v1/home-banner',
-          queryParameters: <String, dynamic>{
-            if (guest) 'guest': 1,
-            if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
-          },
-          options: _requestOptions(
-            skipAuth: guest,
-            cachePolicy: CachePolicy.noCache,
-          ),
-        );
-        final data = response.data;
-        if (data is Map) {
-          if (data.containsKey('items') && data['items'] is List) {
-            banners.addAll(
-              (data['items'] as List).whereType<Map>().map(
-                (m) => _parseSlideData(Map<String, dynamic>.from(m)),
-              ),
-            );
-          } else if (data.containsKey('banners') && data['banners'] is List) {
-            banners.addAll(
-              (data['banners'] as List).whereType<Map>().map(
-                (m) => _parseSlideData(Map<String, dynamic>.from(m)),
-              ),
-            );
-          } else if (data.containsKey('data') && data['data'] is List) {
-            banners.addAll(
-              (data['data'] as List).whereType<Map>().map(
-                (m) => _parseSlideData(Map<String, dynamic>.from(m)),
-              ),
-            );
-          } else {
-            banners.add(_parseSlideData(Map<String, dynamic>.from(data)));
-          }
-        } else if (data is List) {
-          banners.addAll(
-            data.whereType<Map>().map(
-              (m) => _parseSlideData(Map<String, dynamic>.from(m)),
-            ),
-          );
-        }
-      } catch (_) {}
+    final enabledBanners = banners.where((b) => b.enabled).take(30).toList();
+
+    final key = 'home_banners_list_${guest ? 'guest' : 'user'}';
+    if (enabledBanners.isNotEmpty) {
+      final listJson = enabledBanners.map((b) => b.toJson()).toList();
+      await _storageService.settingsBox.put(key, jsonEncode(listJson));
+    } else if (primaryEndpointSucceeded) {
+      await _storageService.settingsBox.delete(key);
     }
 
+    return enabledBanners;
+  }
+
+  Future<HomeLayoutConfig> getHomeLayoutConfig({
+    bool guest = true,
+    bool forceRefresh = false,
+  }) async {
     try {
       final response = await _dioClient.dio.get(
         '/dms/v1/app/home-layout',
         queryParameters: <String, dynamic>{
           if (guest) 'guest': 1,
+          if (forceRefresh) 'force_refresh': 1,
           if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
         },
         options: _requestOptions(
@@ -1218,79 +1389,18 @@ class ProductRepository {
           cachePolicy: CachePolicy.noCache,
         ),
       );
-      final data = response.data;
-      if (data is Map && data['sections'] is List) {
-        for (final raw in data['sections']) {
-          if (raw is! Map) continue;
-          final section = Map<String, dynamic>.from(raw);
-          final type = (section['type'] ?? '').toString().trim().toLowerCase();
-          if (type != 'banner') continue;
-          banners.add(_parseSlideData(section, defaultEnabled: true));
-        }
+      if (response.data is! Map) {
+        return const HomeLayoutConfig();
       }
-    } catch (_) {}
-
-    final enabledBanners = banners.where((b) => b.enabled).take(30).toList();
-
-    if (enabledBanners.isNotEmpty) {
-      final key = 'home_banners_list_${guest ? 'guest' : 'user'}';
-      final listJson = enabledBanners.map((b) => b.toJson()).toList();
-      await _storageService.settingsBox.put(key, jsonEncode(listJson));
-
-      final first = enabledBanners.first;
-      final oldKey = 'home_banner_${guest ? 'guest' : 'user'}';
-      await _storageService.settingsBox.put(oldKey, jsonEncode(first.toJson()));
-    }
-
-    return enabledBanners;
-  }
-
-  Future<HomeBannerData> getHomeBannerData({
-    bool guest = true,
-    bool forceRefresh = false,
-  }) async {
-    final primary = await _fromHomeBannerEndpoint(
-      guest: guest,
-      forceRefresh: forceRefresh,
-    );
-    HomeBannerData result = primary;
-
-    if (!primary.hasImage) {
-      final layoutBanner = await _fromHomeLayoutEndpoint(
-        guest: guest,
-        forceRefresh: forceRefresh,
+      return HomeLayoutConfig.fromJson(
+        Map<String, dynamic>.from(response.data as Map),
       );
-      if (layoutBanner.hasImage) {
-        result = layoutBanner.copyWith(
-          title: primary.title.isNotEmpty ? primary.title : layoutBanner.title,
-          subtitle: primary.subtitle.isNotEmpty
-              ? primary.subtitle
-              : layoutBanner.subtitle,
-          buttonLabel: primary.buttonLabel.isNotEmpty
-              ? primary.buttonLabel
-              : layoutBanner.buttonLabel,
-          buttonLink: primary.buttonLink.isNotEmpty
-              ? primary.buttonLink
-              : layoutBanner.buttonLink,
-        );
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('[HOME_LAYOUT] Failed to load layout config: $error');
       }
+      return const HomeLayoutConfig();
     }
-
-    final key = 'home_banner_${guest ? 'guest' : 'user'}';
-    await _storageService.settingsBox.put(
-      key,
-      jsonEncode(<String, dynamic>{
-        'enabled': result.enabled,
-        'image_url': result.imageUrl,
-        'title': result.title,
-        'subtitle': result.subtitle,
-        'button_label': result.buttonLabel,
-        'button_link': result.buttonLink,
-        'product_ids': result.productIds,
-      }),
-    );
-
-    return result;
   }
 
   Future<void> syncCatalogSnapshot({bool guest = true}) async {
@@ -1434,7 +1544,8 @@ class ProductRepository {
     return brands;
   }
 
-  Future<({List<BrandModel> brands, bool fromFallback})> getCachedBrandsWithSource({bool guest = false}) async {
+  Future<({List<BrandModel> brands, bool fromFallback})>
+  getCachedBrandsWithSource({bool guest = false}) async {
     final scope = await _scopeFor(guest: guest);
     final local = _catalogLocalStore.getBrands(scope: scope);
     final brands = local
@@ -1634,111 +1745,6 @@ class ProductRepository {
     };
   }
 
-  Future<HomeBannerData> _fromHomeBannerEndpoint({
-    required bool guest,
-    bool forceRefresh = false,
-  }) async {
-    try {
-      final response = await _dioClient.dio.get(
-        '/dms/v1/home-banner',
-        queryParameters: <String, dynamic>{
-          if (guest) 'guest': 1,
-          if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
-        },
-        options: _requestOptions(
-          skipAuth: guest,
-          cachePolicy: CachePolicy.noCache,
-        ),
-      );
-
-      final data = response.data;
-      if (data is! Map) {
-        return const HomeBannerData.empty();
-      }
-
-      final map = Map<String, dynamic>.from(data);
-      final enabled = map['enabled'] == true;
-      final image = _normalizeUrl(map['image_url']);
-      if (!enabled) {
-        return HomeBannerData(
-          enabled: false,
-          imageUrl: '',
-          title: _normalizeText(map['title']),
-          subtitle: _normalizeText(map['subtitle']),
-          buttonLabel: _normalizeText(map['button_label']),
-          buttonLink: _normalizeUrl(map['button_link']),
-          productIds: _parseProductIds(map['product_ids']),
-        );
-      }
-
-      return HomeBannerData(
-        enabled: true,
-        imageUrl: image,
-        title: _normalizeText(map['title']),
-        subtitle: _normalizeText(map['subtitle']),
-        buttonLabel: _normalizeText(map['button_label']),
-        buttonLink: _normalizeUrl(map['button_link']),
-        productIds: _parseProductIds(map['product_ids']),
-      );
-    } catch (_) {
-      return const HomeBannerData.empty();
-    }
-  }
-
-  Future<HomeBannerData> _fromHomeLayoutEndpoint({
-    required bool guest,
-    bool forceRefresh = false,
-  }) async {
-    try {
-      final response = await _dioClient.dio.get(
-        '/dms/v1/app/home-layout',
-        queryParameters: <String, dynamic>{
-          if (guest) 'guest': 1,
-          if (forceRefresh) '_t': DateTime.now().millisecondsSinceEpoch,
-        },
-        options: _requestOptions(
-          skipAuth: guest,
-          cachePolicy: CachePolicy.noCache,
-        ),
-      );
-
-      final payload = response.data;
-      if (payload is! Map) {
-        return const HomeBannerData.empty();
-      }
-
-      final root = Map<String, dynamic>.from(payload);
-      final sections = root['sections'];
-      if (sections is! List) {
-        return const HomeBannerData.empty();
-      }
-
-      for (final raw in sections) {
-        if (raw is! Map) continue;
-        final section = Map<String, dynamic>.from(raw);
-        final type = (section['type'] ?? '').toString().trim().toLowerCase();
-        if (type != 'banner') continue;
-
-        final image = _normalizeUrl(section['image']);
-        if (image.isEmpty) continue;
-
-        return HomeBannerData(
-          enabled: true,
-          imageUrl: image,
-          title: _normalizeText(section['title']),
-          subtitle: _normalizeText(section['subtitle']),
-          buttonLabel: _normalizeText(section['button_label']),
-          buttonLink: _normalizeUrl(section['link']),
-          productIds: _parseProductIds(section['product_ids']),
-        );
-      }
-
-      return const HomeBannerData.empty();
-    } catch (_) {
-      return const HomeBannerData.empty();
-    }
-  }
-
   Options _requestOptions({
     required bool skipAuth,
     CachePolicy? cachePolicy,
@@ -1749,38 +1755,6 @@ class ProductRepository {
       cachePolicy: cachePolicy,
       maxStale: maxStale,
     );
-  }
-
-  String _normalizeText(dynamic value) {
-    return TextSanitizer.fix(value);
-  }
-
-  List<int> _parseProductIds(dynamic value) {
-    if (value is Iterable) {
-      return value
-          .map((item) {
-            if (item is int) return item;
-            if (item is num) return item.toInt();
-            return int.tryParse(item.toString().trim());
-          })
-          .whereType<int>()
-          .toList(growable: false);
-    }
-
-    if (value is String) {
-      final normalized = value.trim();
-      if (normalized.isEmpty) {
-        return const <int>[];
-      }
-
-      return normalized
-          .split(',')
-          .map((item) => int.tryParse(item.trim()))
-          .whereType<int>()
-          .toList(growable: false);
-    }
-
-    return const <int>[];
   }
 
   bool _isCategoryHidden(Map<String, dynamic> raw) {
@@ -1864,23 +1838,6 @@ class ProductRepository {
       'hidden',
       'private',
     }.contains(normalized);
-  }
-
-  String _normalizeUrl(dynamic value) {
-    var url = (value ?? '').toString().trim();
-    if (url.isEmpty) return '';
-
-    if (url.startsWith('//')) {
-      url = 'https:$url';
-    } else if (url.startsWith('/')) {
-      url = '${AppConfig.baseUrl}$url';
-    }
-
-    try {
-      return Uri.parse(url).toString();
-    } catch (_) {
-      return url.replaceAll(' ', '%20');
-    }
   }
 
   ProductModel? _tryParseProduct(

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_html/flutter_html.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -20,7 +21,9 @@ import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
 import 'package:lpco_llc/features/products/presentation/utils/product_share_link.dart';
+import 'package:lpco_llc/features/products/presentation/utils/product_description_formatter.dart';
 import 'package:lpco_llc/features/products/presentation/utils/product_units_resolver.dart';
+import 'package:lpco_llc/features/products/presentation/screens/product_image_viewer_screen.dart';
 
 class ProductDetailsScreen extends StatefulWidget {
   final ProductModel product;
@@ -35,17 +38,20 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   final Map<String, String> _selectedAttributes = <String, String>{};
   final ProductRepository _productRepository = ProductRepository();
   final PageController _galleryPageController = PageController();
-  late final List<_UnitOption> _unitOptions;
+  late List<_UnitOption> _unitOptions;
   String? _selectedUnitType;
   String? _selectedColorSlug;
   String? _selectedColorName;
   int _quantity = 1;
   int _imageIndex = 0;
-  List<String>? _hydratedImageUrls;
+  late ProductModel _product;
+  bool _isHydratingProduct = false;
+  Object? _hydrationError;
 
   @override
   void initState() {
     super.initState();
+    _product = widget.product;
     final user = context.read<AuthCubit>().currentUser;
     final currency = user?.currency ?? 'syp';
     final group = user?.group ?? '';
@@ -53,7 +59,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     _selectedUnitType = _unitOptions.length == 1
         ? _unitOptions.first.type
         : null;
-    _hydrateGalleryImagesIfNeeded();
+    _hydrateProduct();
   }
 
   @override
@@ -67,11 +73,13 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       final isGuest = context.read<AuthCubit>().state is! Authenticated;
       await context.read<ProductCubit>().refresh(forceRemote: true);
       final refreshed = await _productRepository.getProductById(
-        widget.product.id,
+        _product.id,
         guest: isGuest,
+        forceRefresh: true,
       );
       if (!mounted) return;
       if (refreshed != null) {
+        _applyHydratedProduct(refreshed);
         if (kDebugMode) {
           debugPrint('[PRODUCT_DETAILS] Product refreshed: id=${refreshed.id}');
         }
@@ -85,7 +93,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final product = widget.product;
+    final product = _product;
     final user = context.read<AuthCubit>().currentUser;
     final isGuest = context.read<AuthCubit>().state is! Authenticated;
     final selectedVariation = _resolveVariation(product);
@@ -136,6 +144,19 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             padding: EdgeInsets.fromLTRB(14, 14, 14, 20 + systemBottomInset),
             children: [
               _gallery(product),
+              if (_isHydratingProduct) ...[
+                const SizedBox(height: 8),
+                const LinearProgressIndicator(minHeight: 2),
+              ] else if (_hydrationError != null) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _hydrateProduct,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text(
+                    '\u0625\u0639\u0627\u062f\u0629 \u062a\u062d\u062f\u064a\u062b \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0645\u0646\u062a\u062c',
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               _headerDetails(
                 product: product,
@@ -252,11 +273,22 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                   itemCount: imageUrls.length,
                   onPageChanged: (value) => setState(() => _imageIndex = value),
                   itemBuilder: (context, index) {
-                    return AppNetworkImage(
-                      imageUrl: imageUrls[index],
-                      fit: BoxFit.contain,
-                      errorWidget: const Center(
-                        child: Icon(Icons.image_not_supported),
+                    return GestureDetector(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ProductImageViewerScreen(
+                            imageUrls: imageUrls,
+                            initialIndex: index,
+                            productName: product.name,
+                          ),
+                        ),
+                      ),
+                      child: AppNetworkImage(
+                        imageUrl: imageUrls[index],
+                        fit: BoxFit.contain,
+                        errorWidget: const Center(
+                          child: Icon(Icons.image_not_supported),
+                        ),
                       ),
                     );
                   },
@@ -420,10 +452,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   }
 
   List<String> _resolveGalleryImageUrls(ProductModel product) {
-    final hydrated = _hydratedImageUrls;
-    if (hydrated != null && hydrated.isNotEmpty) {
-      return hydrated;
-    }
     return _extractImageUrls(product);
   }
 
@@ -442,37 +470,47 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     return urls;
   }
 
-  Future<void> _hydrateGalleryImagesIfNeeded() async {
-    final initialUrls = _extractImageUrls(widget.product);
-    if (initialUrls.length > 1) {
-      return;
-    }
-
+  Future<void> _hydrateProduct() async {
     final authState = context.read<AuthCubit>().state;
     final isGuest = authState is! Authenticated;
-
+    setState(() {
+      _isHydratingProduct = true;
+      _hydrationError = null;
+    });
     try {
       final products = await _productRepository.getProductsByIds(
-        <int>[widget.product.id],
+        <int>[_product.id],
         guest: isGuest,
         includeGallery: true,
+        forceRefresh: true,
       );
-      if (products.isEmpty || !mounted) {
-        return;
-      }
+      if (!mounted) return;
+      if (products.isEmpty) throw StateError('Product not found');
+      _applyHydratedProduct(products.first);
+    } catch (error) {
+      if (mounted) setState(() => _hydrationError = error);
+    } finally {
+      if (mounted) setState(() => _isHydratingProduct = false);
+    }
+  }
 
-      final fetchedUrls = _extractImageUrls(products.first);
-      if (fetchedUrls.length <= initialUrls.length) {
-        return;
+  void _applyHydratedProduct(ProductModel product) {
+    final user = context.read<AuthCubit>().currentUser;
+    final units = _buildUnits(
+      product,
+      user?.currency ?? 'syp',
+      user?.group ?? '',
+    );
+    setState(() {
+      _product = product;
+      _unitOptions = units;
+      if (_selectedUnitType != null &&
+          !units.any((unit) => unit.type == _selectedUnitType)) {
+        _selectedUnitType = units.length == 1 ? units.first.type : null;
       }
-
-      setState(() {
-        _hydratedImageUrls = fetchedUrls;
-        if (_imageIndex >= fetchedUrls.length) {
-          _imageIndex = 0;
-        }
-      });
-    } catch (_) {}
+      final imageCount = _extractImageUrls(product).length;
+      if (_imageIndex >= imageCount) _imageIndex = 0;
+    });
   }
 
   Widget _headerDetails({
@@ -486,7 +524,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     required String? selectedUnitType,
     required ValueChanged<String> onUnitSelected,
   }) {
-    final shortDescription = _shortDescriptionText(product);
+    final shortDescriptionHtml = _shortDescriptionHtml(product);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -502,16 +540,32 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               height: 1.2,
             ),
           ),
-          if (shortDescription.isNotEmpty) ...[
+          if (shortDescriptionHtml.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text(
+              '\u0627\u0644\u0648\u0635\u0641 \u0627\u0644\u0645\u062e\u062a\u0635\u0631',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+            ),
             const SizedBox(height: 6),
-            Text(
-              shortDescription,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF4C5565),
-                fontWeight: FontWeight.w600,
-                height: 1.4,
+            Directionality(
+              textDirection: TextDirection.rtl,
+              child: Html(
+                data: shortDescriptionHtml,
+                style: {
+                  'body': Style(
+                    direction: TextDirection.rtl,
+                    textAlign: TextAlign.right,
+                    color: const Color(0xFF4C5565),
+                    fontWeight: FontWeight.w600,
+                    fontSize: FontSize(14),
+                    lineHeight: LineHeight.number(1.45),
+                    margin: Margins.zero,
+                    padding: HtmlPaddings.zero,
+                  ),
+                  'p': Style(margin: Margins.only(bottom: 6)),
+                  'ul': Style(margin: Margins.only(bottom: 6)),
+                  'li': Style(margin: Margins.only(bottom: 4)),
+                },
               ),
             ),
           ],
@@ -727,14 +781,14 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   }
 
   Widget _colorSection() {
-    if (widget.product.colorOptions.isEmpty) return const SizedBox.shrink();
+    if (_product.colorOptions.isEmpty) return const SizedBox.shrink();
 
     return _section(
       title: 'اللون',
       child: Wrap(
         spacing: 12,
         runSpacing: 12,
-        children: widget.product.colorOptions.map((color) {
+        children: _product.colorOptions.map((color) {
           final selected = color.colorSlug == _selectedColorSlug;
           // Clean the hex, assuming it might have a '#' prefix or just be a word. We'll try to parse it.
           // If empty, map to a default grey.
@@ -797,14 +851,14 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   }
 
   Widget _attributesSection() {
-    if (widget.product.attributes.isEmpty) return const SizedBox.shrink();
+    if (_product.attributes.isEmpty) return const SizedBox.shrink();
 
     return _section(
       title: 'الخيارات',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final attribute in widget.product.attributes) ...[
+          for (final attribute in _product.attributes) ...[
             Text(
               '${attribute.name}${attribute.required ? ' *' : ''}',
               style: const TextStyle(fontWeight: FontWeight.w800),
@@ -906,7 +960,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       title: 'وصف المنتج',
       child: Text(
         product.description.isNotEmpty
-            ? _stripHtml(product.description)
+            ? ProductDescriptionFormatter.toPlainText(product.description)
             : 'لا يوجد وصف متاح',
         style: const TextStyle(
           color: Color(0xFF4C5565),
@@ -1016,15 +1070,15 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   }
 
   bool get _canAddToCart {
-    if (!widget.product.inStock) return false;
+    if (!_product.inStock) return false;
 
     final selectedUnit = _effectiveUnitOption;
     if (selectedUnit == null || selectedUnit.price <= 0) return false;
-    if (widget.product.colorOptions.isNotEmpty && _selectedColorSlug == null) {
+    if (_product.colorOptions.isNotEmpty && _selectedColorSlug == null) {
       return false;
     }
 
-    for (final attr in widget.product.attributes.where(
+    for (final attr in _product.attributes.where(
       (a) => a.required || a.variation,
     )) {
       final value =
@@ -1044,7 +1098,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       return;
     }
 
-    final variation = _resolveVariation(widget.product);
+    final variation = _resolveVariation(_product);
     final unit = _effectiveUnitOption;
     if (unit == null) {
       return;
@@ -1053,10 +1107,10 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     try {
       await context.read<CartCubit>().addToCart(
         CartItemModel(
-          productId: widget.product.id,
-          name: widget.product.name,
+          productId: _product.id,
+          name: _product.name,
           price: unit.price.toString(),
-          image: widget.product.firstImage,
+          image: _product.firstImage,
           selectedVariants: Map<String, dynamic>.from(_selectedAttributes),
           quantity: _quantity,
           unitType: unit.type,
@@ -1150,19 +1204,11 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     return 2;
   }
 
-  String _stripHtml(String html) {
-    return html
-        .replaceAll(RegExp(r'<[^>]*>'), ' ')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
-
-  String _shortDescriptionText(ProductModel product) {
+  String _shortDescriptionHtml(ProductModel product) {
     final raw = product.shortDescription.trim().isNotEmpty
         ? product.shortDescription
         : product.description;
-    return _stripHtml(raw);
+    return raw.trim();
   }
 }
 

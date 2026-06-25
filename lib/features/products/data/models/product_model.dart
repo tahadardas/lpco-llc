@@ -1,16 +1,31 @@
+import 'package:lpco_llc/core/utils/image_url_normalizer.dart';
 import 'package:lpco_llc/core/utils/price_parser.dart';
 import 'package:lpco_llc/core/utils/text_sanitizer.dart';
 
 class ProductImage {
   final int id;
   final String src;
+  final String thumbnailSrc;
 
-  const ProductImage({required this.id, required this.src});
+  const ProductImage({
+    required this.id,
+    required this.src,
+    this.thumbnailSrc = '',
+  });
+
+  String get cardSrc => thumbnailSrc.isNotEmpty ? thumbnailSrc : src;
 
   factory ProductImage.fromJson(Map<String, dynamic> json) {
     return ProductImage(
-      id: json['id'] is int ? json['id'] as int : 0,
-      src: (json['src'] ?? json['url'] ?? '').toString().trim(),
+      id: json['id'] is int
+          ? json['id'] as int
+          : int.tryParse('${json['id'] ?? ''}') ?? 0,
+      src: ImageUrlNormalizer.normalize(
+        json['src'] ?? json['url'] ?? json['image_url'],
+      ),
+      thumbnailSrc: ImageUrlNormalizer.normalize(
+        json['thumbnail_src'] ?? json['thumbnail_url'] ?? json['medium_src'],
+      ),
     );
   }
 }
@@ -324,7 +339,7 @@ class ProductModel {
           .where((img) => img.src.isNotEmpty)
           .toList();
     }
-    final primaryImageUrl = TextSanitizer.fix(json['image_url']).trim();
+    final primaryImageUrl = ImageUrlNormalizer.normalize(json['image_url']);
     if (primaryImageUrl.isNotEmpty) {
       final existingIndex = imageUrls.indexWhere(
         (image) => image.src == primaryImageUrl,
@@ -343,6 +358,7 @@ class ProductModel {
         ];
       }
     }
+    imageUrls = _dedupeProductImages(imageUrls);
 
     List<ProductVariation> parsedVariations = <ProductVariation>[];
     if (json['variations'] is List) {
@@ -446,7 +462,7 @@ class ProductModel {
       barcode4: parsedBarcode4,
       barcodes: parsedBarcodes,
       description: TextSanitizer.fix(json['description']),
-      shortDescription: TextSanitizer.fix(json['short_description']),
+      shortDescription: (json['short_description'] ?? '').toString(),
       permalink: TextSanitizer.fix(json['permalink']),
       price: PriceParser.parse(json['price']).toString(),
       regularPrice: PriceParser.parse(json['regular_price']).toString(),
@@ -533,4 +549,21 @@ List<String> _parseProductBarcodes(
   }
 
   return values;
+}
+
+List<ProductImage> _dedupeProductImages(List<ProductImage> images) {
+  final seen = <String>{};
+  final deduped = <ProductImage>[];
+  for (final image in images) {
+    final src = ImageUrlNormalizer.normalize(image.src);
+    if (src.isEmpty || !seen.add(src)) continue;
+    deduped.add(
+      ProductImage(
+        id: image.id,
+        src: src,
+        thumbnailSrc: ImageUrlNormalizer.normalize(image.thumbnailSrc),
+      ),
+    );
+  }
+  return deduped;
 }

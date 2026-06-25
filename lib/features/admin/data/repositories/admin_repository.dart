@@ -1,8 +1,11 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
+import 'package:flutter/foundation.dart';
 import 'package:lpco_llc/core/network/api_contract.dart';
 import 'package:lpco_llc/core/network/dio_client.dart';
+import 'package:lpco_llc/core/utils/text_sanitizer.dart';
 import 'package:lpco_llc/features/admin/data/models/admin_models.dart';
 import 'package:lpco_llc/features/admin/data/models/admin_order_details_model.dart';
 import 'package:lpco_llc/features/admin/domain/admin_module.dart';
@@ -22,12 +25,16 @@ class AdminRepository {
 
   final Dio _dio;
 
-  Future<AdminDiscoveryResult> discoverModules() async {
+  Future<AdminDiscoveryResult> discoverModules({
+    bool forceRefresh = false,
+  }) async {
     try {
       final response = await _dio.get(
         '/dms/v1/admin/capabilities',
-        options: DioClient().buildOptions(skipDeviceToken: true),
+        queryParameters: _freshQuery(forceRefresh),
+        options: _adminOptions(),
       );
+      _logAdminApiResponse('/dms/v1/admin/capabilities', response);
       final payload = _map(
         response.data,
         endpoint: '/dms/v1/admin/capabilities',
@@ -65,7 +72,11 @@ class AdminRepository {
         modules: modules,
         discoveredAt: DateTime.now(),
       );
-    } catch (_) {
+    } catch (error) {
+      _logAdminApiError('/dms/v1/admin/capabilities', error);
+      if (_isAuthorizationError(error)) {
+        rethrow;
+      }
       return AdminDiscoveryResult(
         modules: await _legacyDiscoverModules(),
         discoveredAt: DateTime.now(),
@@ -73,22 +84,43 @@ class AdminRepository {
     }
   }
 
-  Future<AdminDashboardModel> fetchDashboard() async {
-    final response = await _dio.get(
-      '/dms/v1/admin/stats',
-      options: DioClient().buildOptions(skipDeviceToken: true),
-    );
-    final payload = _map(response.data, endpoint: '/dms/v1/admin/stats');
-    return AdminDashboardModel.fromJson(_detail(payload));
+  Future<AdminDashboardModel> fetchDashboard({
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '/dms/v1/admin/stats',
+        queryParameters: _freshQuery(forceRefresh),
+        options: _adminOptions(),
+      );
+      _logAdminApiResponse('/dms/v1/admin/stats', response);
+      final payload = _map(response.data, endpoint: '/dms/v1/admin/stats');
+      return AdminDashboardModel.fromJson(_detail(payload));
+    } catch (error) {
+      _logAdminApiError('/dms/v1/admin/stats', error);
+      rethrow;
+    }
   }
 
-  Future<AdminDiagnosticsModel> fetchDiagnostics() async {
-    final response = await _dio.get(
-      '/dms/v1/admin/diagnostics',
-      options: DioClient().buildOptions(skipDeviceToken: true),
-    );
-    final payload = _map(response.data, endpoint: '/dms/v1/admin/diagnostics');
-    return AdminDiagnosticsModel.fromJson(_detail(payload));
+  Future<AdminDiagnosticsModel> fetchDiagnostics({
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '/dms/v1/admin/diagnostics',
+        queryParameters: _freshQuery(forceRefresh),
+        options: _adminOptions(),
+      );
+      _logAdminApiResponse('/dms/v1/admin/diagnostics', response);
+      final payload = _map(
+        response.data,
+        endpoint: '/dms/v1/admin/diagnostics',
+      );
+      return AdminDiagnosticsModel.fromJson(_detail(payload));
+    } catch (error) {
+      _logAdminApiError('/dms/v1/admin/diagnostics', error);
+      rethrow;
+    }
   }
 
   Future<AdminPagedResponse<AdminOrderSummaryModel>> fetchOrders({
@@ -310,6 +342,8 @@ class AdminRepository {
     required String audience,
     String imageUrl = '',
     String deepLink = '',
+    String actionType = 'none',
+    String actionValue = '',
     int? targetUserId,
   }) async {
     await _dio.post(
@@ -318,6 +352,8 @@ class AdminRepository {
         'title': title.trim(),
         'body': body.trim(),
         'audience': audience.trim(),
+        'action_type': actionType.trim().isEmpty ? 'none' : actionType.trim(),
+        if (_hasText(actionValue)) 'action_value': actionValue.trim(),
         if (_hasText(imageUrl)) 'image_url': imageUrl.trim(),
         if (_hasText(deepLink)) 'deep_link': deepLink.trim(),
         if (targetUserId != null && targetUserId > 0)
@@ -384,11 +420,15 @@ class AdminRepository {
                 title: legacyBanner.title,
                 subtitle: legacyBanner.subtitle,
                 buttonLabel: legacyBanner.buttonLabel,
+                buttonLink: legacyBanner.buttonLink,
                 actionType: AdminBannerActionType.none,
                 actionValue: '',
                 sortOrder: 1,
                 productIds: legacyBanner.productIds,
                 updatedAt: '',
+                showTitle: true,
+                showSubtitle: true,
+                showButton: true,
               ),
           ],
           updatedAt: '',
@@ -529,6 +569,56 @@ class AdminRepository {
     );
   }
 
+  Future<AdminBrandCategoryLayoutModel> fetchBrandCategoryLayout() async {
+    final response = await _dio.get('/dms/v1/admin/brand-category-layout');
+    final payload = _decodePayload(response.data);
+    return AdminBrandCategoryLayoutModel.fromPayload(_unwrapData(payload));
+  }
+
+  Future<AdminBrandCategoryLayoutModel> updateBrandCategoryLayout(
+    AdminBrandCategoryLayoutModel layout,
+  ) async {
+    final response = await _dio.post(
+      '/dms/v1/admin/brand-category-layout',
+      data: layout.toJson(),
+    );
+    final payload = _decodePayload(response.data);
+    final data = _unwrapData(payload);
+    final saved = AdminBrandCategoryLayoutModel.fromPayload(<String, dynamic>{
+      'layout': data is Map ? data['layout'] : data,
+      'available': <String, dynamic>{
+        'brands': layout.availableBrands.map((brand) {
+          return <String, dynamic>{
+            'id': brand.id,
+            'name': brand.name,
+            'slug': brand.slug,
+            'image_url': brand.imageUrl,
+            'menu_order': brand.menuOrder,
+            'hidden': brand.hidden,
+            'show_in_app': brand.showInApp,
+          };
+        }).toList(),
+        'categories': layout.availableCategories.map((category) {
+          return <String, dynamic>{
+            'id': category.id,
+            'name': category.name,
+            'slug': category.slug,
+            'image_url': category.imageUrl,
+            'menu_order': category.menuOrder,
+            'hidden': category.hidden,
+            'show_in_app': category.showInApp,
+          };
+        }).toList(),
+      },
+    });
+    return saved.availableBrands.isEmpty && saved.availableCategories.isEmpty
+        ? saved.copyWith(
+            availableBrands: layout.availableBrands,
+            availableCategories: layout.availableCategories,
+          )
+        : saved;
+  }
+
   Future<AdminProductModel> fetchProductDetails(int productId) async {
     final response = await _dio.get('/dms/v1/admin/products/$productId');
     final payload = _map(
@@ -610,10 +700,7 @@ class AdminRepository {
         '/dms/v1/admin/notifications/history',
         '/dms/v1/admin/notifications/send',
       ],
-      'home-banner': <String>['/dms/v1/admin/home-banner'],
-      'home-layout': <String>['/dms/v1/admin/home-layout'],
-      'app-theme': <String>['/dms/v1/admin/theme'],
-      'popup-config': <String>['/dms/v1/admin/popup'],
+      'home-banner': <String>['/dms/v1/admin/home-banners'],
       'products': <String>['/dms/v1/admin/products'],
       'reviews': <String>['/dms/v1/admin/reviews'],
       'ordering': <String>['/dms/v1/admin/ordering'],
@@ -666,6 +753,20 @@ class AdminRepository {
     return payload;
   }
 
+  dynamic _decodePayload(dynamic data) {
+    if (data is String && data.trim().isNotEmpty) {
+      return jsonDecode(data);
+    }
+    return data;
+  }
+
+  dynamic _unwrapData(dynamic payload) {
+    if (payload is Map && payload.containsKey('data')) {
+      return payload['data'];
+    }
+    return payload;
+  }
+
   Map<String, dynamic> _map(dynamic data, {required String endpoint}) {
     if (data is Map<String, dynamic>) {
       return data;
@@ -680,11 +781,77 @@ class AdminRepository {
     return ApiContract.expectMap(data, endpoint: endpoint);
   }
 
+  Options _adminOptions() {
+    return DioClient().buildOptions(
+      skipDeviceToken: true,
+      cachePolicy: CachePolicy.noCache,
+    );
+  }
+
+  Map<String, dynamic> _freshQuery(bool forceRefresh) {
+    if (!forceRefresh) {
+      return const <String, dynamic>{};
+    }
+    return <String, dynamic>{
+      'force_refresh': 1,
+      '_t': DateTime.now().millisecondsSinceEpoch,
+    };
+  }
+
+  void _logAdminApiResponse(String endpoint, Response<dynamic> response) {
+    if (!kDebugMode) {
+      return;
+    }
+    final hasAuth = '${response.requestOptions.headers['Authorization'] ?? ''}'
+        .trim()
+        .isNotEmpty;
+    debugPrint(
+      '[ADMIN_API] $endpoint status=${response.statusCode} '
+      'auth header exists=${hasAuth ? 'yes' : 'no'} '
+      'body=${_bodyPreview(response.data)}',
+    );
+  }
+
+  void _logAdminApiError(String endpoint, Object error) {
+    if (!kDebugMode) {
+      return;
+    }
+    if (error is DioException) {
+      final hasAuth = '${error.requestOptions.headers['Authorization'] ?? ''}'
+          .trim()
+          .isNotEmpty;
+      debugPrint(
+        '[ADMIN_API] $endpoint status=${error.response?.statusCode} '
+        'auth header exists=${hasAuth ? 'yes' : 'no'} '
+        'body=${_bodyPreview(error.response?.data)} '
+        'error=${error.message}',
+      );
+      return;
+    }
+    debugPrint('[ADMIN_API] $endpoint error=$error');
+  }
+
+  bool _isAuthorizationError(Object error) {
+    if (error is! DioException) {
+      return false;
+    }
+    final statusCode = error.response?.statusCode ?? 0;
+    return statusCode == 401 || statusCode == 403;
+  }
+
+  String _bodyPreview(dynamic data) {
+    final text = data is String ? data.trim() : '$data'.trim();
+    if (text.length <= 600) {
+      return text;
+    }
+    return '${text.substring(0, 600)}...';
+  }
+
   bool _bool(dynamic value) {
     if (value is bool) return value;
     return _string(value).toLowerCase() == 'true' || '$value' == '1';
   }
 
-  String _string(dynamic value) => value == null ? '' : '$value'.trim();
+  String _string(dynamic value) => TextSanitizer.fix(value);
   bool _hasText(String? value) => value != null && value.trim().isNotEmpty;
 }

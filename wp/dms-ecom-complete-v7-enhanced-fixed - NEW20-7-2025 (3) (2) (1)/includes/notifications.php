@@ -227,6 +227,8 @@ function dms_notifications_render_admin() {
     $body = '';
     $image_url = '';
     $deep_link = '';
+    $action_type = 'none';
+    $action_value = '';
     $target_user_id = '';
     $message = '';
     $has_fcm = dms_fcm_is_configured();
@@ -240,10 +242,12 @@ function dms_notifications_render_admin() {
             $body = wp_kses_post($_POST['body'] ?? '');
             $image_url = esc_url_raw($_POST['image_url'] ?? '');
             $deep_link = sanitize_text_field($_POST['deep_link'] ?? '');
+            $action_type = sanitize_text_field($_POST['action_type'] ?? 'none');
+            $action_value = sanitize_text_field($_POST['action_value'] ?? '');
             $audience = sanitize_text_field($_POST['audience'] ?? 'all');
             $target_user_id = isset($_POST['target_user_id']) ? intval($_POST['target_user_id']) : 0;
 
-            $result = dms_notifications_send($title, $body, $image_url, $deep_link, $audience, $target_user_id);
+            $result = dms_notifications_send($title, $body, $image_url, $deep_link, $audience, $target_user_id, $action_type, $action_value);
             if (is_wp_error($result)) {
                 $message = 'فشل الإرسال: ' . $result->get_error_message();
             } else {
@@ -271,7 +275,18 @@ function dms_notifications_render_admin() {
                 <tr><th>العنوان</th><td><input type="text" name="title" value="<?php echo esc_attr($title); ?>" style="width: 420px;"></td></tr>
                 <tr><th>النص</th><td><textarea name="body" rows="4" style="width: 420px;"><?php echo esc_textarea($body); ?></textarea></td></tr>
                 <tr><th>رابط صورة (اختياري)</th><td><input type="text" name="image_url" value="<?php echo esc_attr($image_url); ?>" style="width: 420px;"></td></tr>
-                <tr><th>رابط عميق (اختياري)</th><td><input type="text" name="deep_link" value="<?php echo esc_attr($deep_link); ?>" style="width: 420px;" placeholder="مثال: product:123 أو /notifications"></td></tr>
+                <tr>
+                    <th>نوع الإجراء</th>
+                    <td>
+                        <select name="action_type" id="dms_action_type">
+                            <?php foreach (dms_notifications_allowed_action_types() as $value => $label): ?>
+                                <option value="<?php echo esc_attr($value); ?>" <?php selected($action_type, $value); ?>><?php echo esc_html($label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <input type="text" name="action_value" id="dms_action_value" value="<?php echo esc_attr($action_value); ?>" style="width: 280px;" placeholder="ID المنتج/التصنيف أو slug العلامة أو كلمة البحث">
+                    </td>
+                </tr>
+                <tr><th>رابط عميق احتياطي</th><td><input type="text" name="deep_link" value="<?php echo esc_attr($deep_link); ?>" style="width: 420px;" placeholder="مثال: product:123 أو /notifications"></td></tr>
                 <tr>
                     <th>الجمهور</th>
                     <td>
@@ -294,6 +309,13 @@ function dms_notifications_render_admin() {
                 if(!sel||!tgt)return;
                 const toggle=()=>{tgt.style.display=sel.value==='single_user'?'inline-block':'none';}
                 sel.addEventListener('change',toggle);toggle();
+                const actionType=document.getElementById('dms_action_type');
+                const actionValue=document.getElementById('dms_action_value');
+                if(actionType&&actionValue){
+                    const noValue=['none','orders','cart','account','notifications'];
+                    const refreshValue=()=>{actionValue.style.display=noValue.includes(actionType.value)?'none':'inline-block';};
+                    actionType.addEventListener('change',refreshValue);refreshValue();
+                }
             })();
         </script>
     </div>
@@ -906,6 +928,8 @@ function dms_admin_notifications_send(WP_REST_Request $request) {
     $message = wp_kses_post($body['body'] ?? '');
     $image_url = esc_url_raw($body['image_url'] ?? '');
     $deep_link = sanitize_text_field($body['deep_link'] ?? '');
+    $action_type = sanitize_text_field($body['action_type'] ?? 'none');
+    $action_value = sanitize_text_field($body['action_value'] ?? '');
     $audience = dms_notifications_normalize_audience($body['audience'] ?? 'all');
     $target_user_id = intval($body['target_user_id'] ?? 0);
 
@@ -916,7 +940,7 @@ function dms_admin_notifications_send(WP_REST_Request $request) {
         return new WP_Error('invalid_payload', 'target_user_id is required for single_user audience', array('status' => 400));
     }
 
-    $result = dms_notifications_send($title, $message, $image_url, $deep_link, $audience, $target_user_id);
+    $result = dms_notifications_send($title, $message, $image_url, $deep_link, $audience, $target_user_id, $action_type, $action_value);
     if (is_wp_error($result)) {
         return $result;
     }
@@ -941,7 +965,70 @@ function dms_admin_notifications_send(WP_REST_Request $request) {
 /**
  * Sending logic
  */
-function dms_notifications_send($title, $body, $image_url, $deep_link, $audience, $target_user_id = 0) {
+function dms_notifications_allowed_action_types() {
+    return array(
+        'none' => 'بدون إجراء',
+        'product' => 'منتج',
+        'category' => 'تصنيف',
+        'brand' => 'علامة تجارية',
+        'search' => 'بحث',
+        'orders' => 'الطلبات',
+        'cart' => 'السلة',
+        'account' => 'الحساب',
+        'notifications' => 'الإشعارات',
+        'externalUrl' => 'رابط خارجي',
+        'internalRoute' => 'مسار داخلي',
+    );
+}
+
+function dms_notifications_normalize_action_type($action_type) {
+    $action_type = trim((string) $action_type);
+    $allowed = array_keys(dms_notifications_allowed_action_types());
+    return in_array($action_type, $allowed, true) ? $action_type : 'none';
+}
+
+function dms_notifications_build_action_target($action_type, $action_value, $fallback_deep_link = '') {
+    $action_type = dms_notifications_normalize_action_type($action_type);
+    $action_value = trim((string) $action_value);
+
+    if ($action_type === 'none') {
+        return sanitize_text_field($fallback_deep_link);
+    }
+
+    if (in_array($action_type, array('orders', 'cart', 'account', 'notifications'), true)) {
+        return $action_type;
+    }
+
+    if ($action_value === '') {
+        return sanitize_text_field($fallback_deep_link);
+    }
+
+    if (in_array($action_type, array('product', 'category'), true)) {
+        $id = absint($action_value);
+        return $id > 0 ? $action_type . ':' . $id : sanitize_text_field($fallback_deep_link);
+    }
+
+    if ($action_type === 'brand') {
+        return 'brand:' . sanitize_title($action_value);
+    }
+
+    if ($action_type === 'search') {
+        return 'search:' . sanitize_text_field($action_value);
+    }
+
+    if ($action_type === 'externalUrl') {
+        return esc_url_raw($action_value);
+    }
+
+    if ($action_type === 'internalRoute') {
+        $route = sanitize_text_field($action_value);
+        return strpos($route, '/') === 0 && strpos($route, '//') !== 0 ? $route : sanitize_text_field($fallback_deep_link);
+    }
+
+    return sanitize_text_field($fallback_deep_link);
+}
+
+function dms_notifications_send($title, $body, $image_url, $deep_link, $audience, $target_user_id = 0, $action_type = 'none', $action_value = '') {
     global $wpdb;
 
     $fcm_configured = dms_fcm_is_configured();
@@ -950,6 +1037,10 @@ function dms_notifications_send($title, $body, $image_url, $deep_link, $audience
     }
 
     $audience = dms_notifications_normalize_audience($audience);
+    $action_type = dms_notifications_normalize_action_type($action_type);
+    $action_value = sanitize_text_field($action_value);
+    $target = dms_notifications_build_action_target($action_type, $action_value, $deep_link);
+    $deep_link = $target !== '' ? $target : sanitize_text_field($deep_link);
     $target_user_id = intval($target_user_id);
     if ($audience === 'single_user' && $target_user_id <= 0) {
         return new WP_Error('invalid_target_user', 'معرّف المستخدم مطلوب عند الإرسال لمستخدم محدد.', array('status' => 400));
@@ -1016,7 +1107,12 @@ function dms_notifications_send($title, $body, $image_url, $deep_link, $audience
             foreach ($batch as $t) {
                 $data = array(
                     'notification_id' => $notification_id,
+                    'action_type' => $action_type,
+                    'action_value' => $action_value,
+                    'target' => $target,
                     'deep_link' => $deep_link,
+                    'title' => $title,
+                    'body' => wp_strip_all_tags($body),
                     'image_url' => $image_url
                 );
                 $result = dms_fcm_send_message($t['token'], $title, $body, $data, $image_url);

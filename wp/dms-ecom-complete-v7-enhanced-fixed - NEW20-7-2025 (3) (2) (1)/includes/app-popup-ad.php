@@ -53,8 +53,7 @@ function dms_app_popup_ad_register_settings() {
     register_setting('dms_app_popup_ad_group', 'dms_app_popup_ad_action_value');
 }
 
-// 2. Register Menu
-add_action('admin_menu', 'dms_app_popup_ad_register_menu');
+// The popup editor is intentionally hidden until the Flutter app consumes it.
 function dms_app_popup_ad_register_menu() {
     add_submenu_page(
         'dms-app-main',

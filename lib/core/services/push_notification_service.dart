@@ -6,9 +6,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lpco_llc/app/router/app_router.dart';
-import 'package:lpco_llc/app/router/app_routes.dart';
+import 'package:lpco_llc/core/navigation/app_action_handler.dart';
 import 'package:lpco_llc/core/network/api_contract.dart';
 import 'package:lpco_llc/core/network/dio_client.dart';
 import 'package:lpco_llc/core/storage/storage_service.dart';
@@ -410,6 +409,10 @@ class PushNotificationService {
     final target = _resolveTarget(message.data);
     final payload = <String, dynamic>{
       if (target.isNotEmpty) 'target': target,
+      if (TextSanitizer.fix(message.data['action_type']).isNotEmpty)
+        'action_type': TextSanitizer.fix(message.data['action_type']),
+      if (TextSanitizer.fix(message.data['action_value']).isNotEmpty)
+        'action_value': TextSanitizer.fix(message.data['action_value']),
       if (TextSanitizer.fix(message.data['deep_link']).isNotEmpty)
         'deep_link': TextSanitizer.fix(message.data['deep_link']),
       if (TextSanitizer.fix(message.data['notification_id']).isNotEmpty)
@@ -509,6 +512,13 @@ class PushNotificationService {
       return '';
     }
 
+    final actionType = TextSanitizer.fix(data['action_type']);
+    final actionValue = TextSanitizer.fix(data['action_value']);
+    final actionTarget = _targetFromAction(actionType, actionValue);
+    if (actionTarget.isNotEmpty) {
+      return actionTarget;
+    }
+
     final candidates = <dynamic>[
       data['target'],
       data['deep_link'],
@@ -533,6 +543,34 @@ class PushNotificationService {
     return '';
   }
 
+  String _targetFromAction(String actionType, String actionValue) {
+    final type = actionType.trim().toLowerCase().replaceAll('_', '');
+    final value = actionValue.trim();
+    switch (type) {
+      case '':
+      case 'none':
+        return '';
+      case 'product':
+      case 'category':
+        final id = int.tryParse(value);
+        return id == null || id <= 0 ? '' : '$type:$id';
+      case 'brand':
+        return value.isEmpty ? '' : 'brand:$value';
+      case 'search':
+        return value.isEmpty ? '' : 'search:$value';
+      case 'orders':
+      case 'cart':
+      case 'account':
+      case 'notifications':
+        return type;
+      case 'externalurl':
+      case 'internalroute':
+        return value;
+      default:
+        return '';
+    }
+  }
+
   String _normalizeTarget(String raw) {
     final value = raw.trim();
     if (value.isEmpty) {
@@ -549,7 +587,8 @@ class PushNotificationService {
 
     if (lowered.startsWith('product:') ||
         lowered.startsWith('category:') ||
-        lowered.startsWith('brand:')) {
+        lowered.startsWith('brand:') ||
+        lowered.startsWith('search:')) {
       return value;
     }
 
@@ -568,7 +607,9 @@ class PushNotificationService {
       } catch (_) {
         return '';
       }
-      return '';
+      return lowered.startsWith('http://') || lowered.startsWith('https://')
+          ? value
+          : '';
     }
 
     if (value.startsWith('/')) {
@@ -661,48 +702,29 @@ class PushNotificationService {
       return;
     }
 
-    if (normalized.startsWith('product:')) {
-      final id = int.tryParse(normalized.split(':').last);
-      if (id != null) {
-        resolvedContext.go(AppRoutePaths.productUrl(id));
-      }
+    if (normalized.toLowerCase().startsWith('http://') ||
+        normalized.toLowerCase().startsWith('https://')) {
+      AppActionHandler.handle(
+        resolvedContext,
+        actionType: 'externalUrl',
+        actionValue: normalized,
+      );
       return;
     }
 
-    if (normalized.startsWith('category:')) {
-      final id = int.tryParse(normalized.split(':').last);
-      if (id != null) {
-        resolvedContext.go(AppRoutePaths.categoryUrl(id));
-      }
-      return;
-    }
-
-    if (normalized.startsWith('brand:')) {
-      final slug = normalized.split(':').last.trim();
-      if (slug.isNotEmpty) {
-        resolvedContext.go(AppRoutePaths.brandUrl(slug));
-      }
-      return;
-    }
-
-    switch (normalized) {
-      case 'notifications':
-        resolvedContext.go(AppRoutePaths.notifications);
-        return;
-      case 'orders':
-        resolvedContext.go(AppRoutePaths.orders);
-        return;
-      case 'cart':
-        resolvedContext.go(AppRoutePaths.cart);
-        return;
-      case 'account':
-        resolvedContext.go(AppRoutePaths.account);
-        return;
-      default:
-        if (normalized.startsWith('/')) {
-          resolvedContext.go(normalized);
-        }
-        return;
-    }
+    final separator = normalized.indexOf(':');
+    final actionType = separator > 0
+        ? normalized.substring(0, separator)
+        : normalized.startsWith('/')
+        ? 'internalRoute'
+        : normalized;
+    final actionValue = separator > 0
+        ? normalized.substring(separator + 1)
+        : normalized;
+    AppActionHandler.handle(
+      resolvedContext,
+      actionType: actionType,
+      actionValue: actionValue,
+    );
   }
 }

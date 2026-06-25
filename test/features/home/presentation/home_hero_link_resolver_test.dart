@@ -17,6 +17,9 @@ void main() {
         AppRoutePaths.searchUrl(query: 'pencil'),
       );
       expect(homeHeroInternalRouteForLink('catalog'), AppRoutePaths.catalog);
+      expect(homeHeroInternalRouteForLink('https://evil.test'), isNull);
+      expect(homeHeroInternalRouteForLink('//evil.test'), isNull);
+      expect(homeHeroInternalRouteForLink('/catalog'), '/catalog');
     },
   );
 }
