@@ -26,9 +26,7 @@ class CheckoutForm {
   });
 
   bool get hasValidShippingData {
-    return fullName.trim().isNotEmpty &&
-        phone.trim().isNotEmpty &&
-        address.trim().isNotEmpty;
+    return fullName.trim().isNotEmpty && address.trim().isNotEmpty;
   }
 
   String buildOrderComment() {

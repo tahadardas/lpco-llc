@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:lpco_llc/app/router/app_routes.dart';
 
 import 'package:lpco_llc/core/config/app_config.dart';
+import 'package:lpco_llc/core/l10n/app_review_strings.dart';
 import 'package:lpco_llc/core/widgets/app_drawer.dart';
 import 'package:lpco_llc/core/widgets/app_skeleton.dart';
 import 'package:lpco_llc/core/widgets/brand_app_bar.dart';
@@ -49,7 +50,8 @@ class AccountScreen extends StatelessWidget {
           if (user == null) {
             return _buildGuestFallback(
               context,
-              message: 'تعذر تحميل بيانات الحساب حالياً. يمكنك تسجيل الدخول مجدداً.',
+              message:
+                  'تعذر تحميل بيانات الحساب حالياً. يمكنك تسجيل الدخول مجدداً.',
             );
           }
           final isAdmin = _isAdminUser(user.roles, user.group, user.isGuest);
@@ -99,6 +101,11 @@ class AccountScreen extends StatelessWidget {
                     icon: Icons.support_agent_rounded,
                     title: 'الدعم',
                     onTap: () => _openSupportActions(context),
+                  ),
+                  _actionTile(
+                    icon: Icons.settings_outlined,
+                    title: AppReviewStrings.of(context).settings,
+                    onTap: () => context.push(AppRoutePaths.accountSettings),
                   ),
                   _actionTile(
                     icon: Icons.security_rounded,
@@ -180,11 +187,7 @@ class AccountScreen extends StatelessWidget {
     );
   }
 
-
-  Widget _buildGuestFallback(
-    BuildContext context, {
-    required String message,
-  }) {
+  Widget _buildGuestFallback(BuildContext context, {required String message}) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -197,11 +200,7 @@ class AccountScreen extends StatelessWidget {
               const CircleAvatar(
                 radius: 34,
                 backgroundColor: GlassStyle.fireRed,
-                child: Icon(
-                  Icons.person,
-                  color: Colors.white,
-                  size: 36,
-                ),
+                child: Icon(Icons.person, color: Colors.white, size: 36),
               ),
               const SizedBox(height: 12),
               Text(

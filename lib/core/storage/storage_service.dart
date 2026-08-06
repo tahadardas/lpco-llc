@@ -196,6 +196,72 @@ class StorageService {
     await secureStorage.delete(key: _deviceTokenKey);
   }
 
+  Future<void> clearUserScopedData(String userScope) async {
+    final scope = userScope.trim();
+    if (scope.isEmpty || scope == 'guest') {
+      throw ArgumentError.value(
+        userScope,
+        'userScope',
+        'A user scope is required',
+      );
+    }
+
+    await Future.wait<dynamic>(<Future<dynamic>>[
+      _deleteBoxKeysContaining(cartBox, scope),
+      _deleteBoxKeysContaining(behaviorBox, scope),
+      _deleteBoxKeysContaining(settingsBox, scope),
+      _deleteBoxKeysContaining(recentSearchesBox, scope),
+      _deleteBoxKeysContaining(catalogBox, scope),
+      _deleteBoxKeysContaining(ordersBox, scope),
+      _deleteBoxKeysContaining(syncMetaBox, scope),
+      _deleteBoxKeysContaining(searchIndexBox, scope),
+      sharedPreferences.remove('$_savedProductsPrefix$scope'),
+      clearLastRouteState(),
+    ]);
+    await _clearSyncQueueForScope(scope);
+  }
+
+  Future<void> _deleteBoxKeysContaining(Box box, String scope) async {
+    final matchingKeys = box.keys
+        .where((key) => key is String && key.contains(scope))
+        .toList(growable: false);
+    if (matchingKeys.isNotEmpty) {
+      await box.deleteAll(matchingKeys);
+    }
+  }
+
+  Future<void> _clearSyncQueueForScope(String scope) async {
+    const indexKey = 'sq_idx_all';
+    final rawIds = syncQueueBox.get(indexKey);
+    if (rawIds is! List) {
+      return;
+    }
+
+    final remaining = <String>[];
+    for (final rawId in rawIds) {
+      final id = rawId.toString();
+      final key = 'sq_item::$id';
+      final raw = syncQueueBox.get(key);
+      var belongsToDeletedUser = false;
+      if (raw is String && raw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(raw);
+          belongsToDeletedUser =
+              decoded is Map && decoded['user_scope']?.toString() == scope;
+        } catch (_) {
+          belongsToDeletedUser = raw.contains(scope);
+        }
+      }
+
+      if (belongsToDeletedUser) {
+        await syncQueueBox.delete(key);
+      } else {
+        remaining.add(id);
+      }
+    }
+    await syncQueueBox.put(indexKey, remaining);
+  }
+
   List<int> getSavedProductIds(String userScope) {
     final values = sharedPreferences.getStringList(
       '$_savedProductsPrefix$userScope',

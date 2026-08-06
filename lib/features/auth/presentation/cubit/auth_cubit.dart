@@ -215,6 +215,11 @@ class AuthCubit extends Cubit<AuthState> {
     _emitSafe(const Unauthenticated());
   }
 
+  void markAccountDeleted() {
+    _backgroundedAt = null;
+    _emitSafe(const Unauthenticated());
+  }
+
   Future<void> completeSecuritySetup({
     required String pin,
     required bool enableBiometric,

@@ -103,6 +103,7 @@ include_once DMS_ECOM_PATH . 'includes/api/users-routes.php';
 include_once DMS_ECOM_PATH . 'includes/api/catalog-logic.php';
 include_once DMS_ECOM_PATH . 'includes/api/order-logic.php';
 include_once DMS_ECOM_PATH . 'includes/api/user-logic.php';
+include_once DMS_ECOM_PATH . 'includes/api/account-deletion.php';
 include_once DMS_ECOM_PATH . 'includes/admin-dashboard.php';
 include_once DMS_ECOM_PATH . 'includes/admin-endpoints.php';
 include_once DMS_ECOM_PATH . 'includes/app-home-layout.php';

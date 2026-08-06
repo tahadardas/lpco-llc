@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lpco_llc/core/config/app_config.dart';
+import 'package:lpco_llc/core/l10n/app_review_strings.dart';
 import 'package:lpco_llc/core/navigation/app_back_scope.dart';
+import 'package:lpco_llc/core/utils/phone_number.dart';
 import 'package:lpco_llc/features/auth/presentation/cubit/auth_cubit.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -25,6 +27,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _confirmController = TextEditingController();
 
   bool _submitted = false;
+
+  String get _normalizedPhone => PhoneNumber.combine(
+    countryCode: _phoneCodeController.text,
+    subscriberNumber: _phoneController.text,
+  );
+
+  String? _validatePhone(String? value) {
+    if ((value ?? '').trim().isEmpty) {
+      return null;
+    }
+    return PhoneNumber.validateOptional(
+      '${_phoneCodeController.text.trim()}${value!.trim()}',
+    );
+  }
+
+  String? _validatePhoneCode(String? value) {
+    if (_phoneController.text.trim().isEmpty) {
+      return null;
+    }
+    final code = value?.trim() ?? '';
+    if (!RegExp(r'^\+\d{1,4}$').hasMatch(code)) {
+      return 'رمز غير صالح';
+    }
+    return null;
+  }
 
   void _setControllerText(TextEditingController controller, String value) {
     controller.value = TextEditingValue(
@@ -59,8 +86,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       firstName: '',
       company: _companyController.text.trim(),
       province: _provinceController.text.trim(),
-      phone:
-          '${_phoneCodeController.text.trim()}${_phoneController.text.trim()}',
+      phone: _normalizedPhone,
       address: _addressController.text.trim(),
     );
   }
@@ -142,10 +168,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           child: TextFormField(
                             controller: _phoneCodeController,
                             decoration: const InputDecoration(labelText: 'رمز'),
-                            validator: (value) =>
-                                value == null || value.trim().isEmpty
-                                ? 'مطلوب'
-                                : null,
+                            validator: _validatePhoneCode,
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -153,16 +176,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           child: TextFormField(
                             controller: _phoneController,
                             keyboardType: TextInputType.phone,
-                            decoration: const InputDecoration(
-                              labelText: 'رقم الهاتف *',
+                            decoration: InputDecoration(
+                              labelText: AppReviewStrings.of(
+                                context,
+                              ).phoneOptional,
                             ),
-                            validator: (value) =>
-                                value == null || value.trim().isEmpty
-                                ? 'حقل مطلوب'
-                                : null,
+                            validator: _validatePhone,
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        AppReviewStrings.of(context).phoneContactWarning,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(

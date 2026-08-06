@@ -48,7 +48,10 @@ class CheckoutConfirmStep extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _summaryRow('الاسم', form.fullName.trim()),
-              _summaryRow('الهاتف', form.phone.trim()),
+              _summaryRow(
+                'الهاتف',
+                form.phone.trim().isEmpty ? 'غير محدد' : form.phone.trim(),
+              ),
               _summaryRow('العنوان', form.address.trim()),
               _summaryRow(
                 'المدينة',

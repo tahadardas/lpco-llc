@@ -178,6 +178,30 @@ class PushNotificationService {
     await _registerDeviceToken(resolvedToken);
   }
 
+  Future<void> forgetDeviceAfterAccountDeletion() async {
+    try {
+      final messaging = _fcm;
+      if (messaging != null) {
+        await messaging.deleteToken();
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Failed to invalidate the FCM token: $error');
+      }
+    }
+    try {
+      await _localNotifications.cancelAll();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Failed to clear local notifications: $error');
+      }
+    }
+    await Future.wait(<Future<void>>[
+      _storageService.deleteDeviceToken(),
+      _storageService.deleteSecure(_fallbackTokenStorageKey),
+    ]);
+  }
+
   Future<void> _registerDeviceToken(
     String token, {
     bool forceGuest = false,

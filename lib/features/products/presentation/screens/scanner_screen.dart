@@ -6,13 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'package:lpco_llc/app/router/app_routes.dart';
+import 'package:lpco_llc/core/l10n/app_review_strings.dart';
 import 'package:lpco_llc/core/navigation/app_back_scope.dart';
+import 'package:lpco_llc/features/products/application/camera_permission_coordinator.dart';
 import 'package:lpco_llc/features/products/data/models/product_model.dart';
 import 'package:lpco_llc/features/products/data/repositories/product_repository.dart';
 import 'package:lpco_llc/features/products/presentation/cubit/product_cubit.dart';
+import 'package:lpco_llc/features/products/presentation/widgets/camera_permission_prompt.dart';
 
 class ScannerScreen extends StatefulWidget {
   final bool returnScannedCode;
@@ -23,9 +25,10 @@ class ScannerScreen extends StatefulWidget {
   State<ScannerScreen> createState() => _ScannerScreenState();
 }
 
-class _ScannerScreenState extends State<ScannerScreen> {
+class _ScannerScreenState extends State<ScannerScreen>
+    with WidgetsBindingObserver {
   final MobileScannerController controller = MobileScannerController(
-    autoStart: true,
+    autoStart: false,
     detectionSpeed: DetectionSpeed.noDuplicates,
     detectionTimeoutMs: 800,
     facing: CameraFacing.back,
@@ -43,10 +46,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
     ],
   );
   final ProductRepository _productRepository = ProductRepository();
+  final CameraPermissionCoordinator _permissionCoordinator =
+      const CameraPermissionCoordinator();
 
   bool _isProcessing = false;
-  PermissionStatus _permissionStatus = PermissionStatus.provisional;
-  bool _isCheckingPermission = true;
+  CameraPermissionState _permissionState = CameraPermissionState.checking;
+  bool _isRequestingPermission = false;
+  bool _isStartingCamera = false;
+  bool _cameraStartFailed = false;
   DateTime? _lastAcceptedAt;
   String? _lastAcceptedCode;
   Timer? _steadyHintTimer;
@@ -55,35 +62,127 @@ class _ScannerScreenState extends State<ScannerScreen> {
   @override
   void initState() {
     super.initState();
-    _checkPermission();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_refreshPermission());
   }
 
-  Future<void> _checkPermission() async {
-    final status = await Permission.camera.status;
-    if (status.isGranted) {
-      setState(() {
-        _permissionStatus = status;
-        _isCheckingPermission = false;
-      });
-      _startSteadyHintTimer();
-      return;
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshPermission());
     }
+  }
 
-    setState(() => _isCheckingPermission = false);
-    _requestPermission();
+  Future<void> _refreshPermission() async {
+    try {
+      final state = await _permissionCoordinator.inspect();
+      if (!mounted) return;
+      setState(() {
+        _permissionState = state;
+        _cameraStartFailed = false;
+      });
+      if (state == CameraPermissionState.granted) {
+        await _startCamera();
+      } else if (controller.value.isRunning) {
+        await controller.stop();
+      }
+    } catch (error, stack) {
+      if (kDebugMode) {
+        debugPrint('[CAMERA_PERMISSION] Status check failed: $error\n$stack');
+      }
+      if (!mounted) return;
+      setState(() => _permissionState = CameraPermissionState.failed);
+    }
   }
 
   Future<void> _requestPermission() async {
-    final status = await Permission.camera.request();
-    if (!mounted) return;
-    setState(() => _permissionStatus = status);
-    if (status.isGranted) {
-      _startSteadyHintTimer();
+    if (_isRequestingPermission) return;
+    setState(() => _isRequestingPermission = true);
+    try {
+      final state = await _permissionCoordinator.request();
+      if (!mounted) return;
+      setState(() {
+        _permissionState = state;
+        _cameraStartFailed = false;
+      });
+      if (state == CameraPermissionState.granted) {
+        await _startCamera();
+        return;
+      }
+      if (!mounted) return;
+      if (state == CameraPermissionState.permanentlyDenied ||
+          state == CameraPermissionState.restricted) {
+        await _showOpenSettingsDialog();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppReviewStrings.of(context).cameraDenied)),
+        );
+      }
+    } catch (error, stack) {
+      if (kDebugMode) {
+        debugPrint('[CAMERA_PERMISSION] Request failed: $error\n$stack');
+      }
+      if (!mounted) return;
+      setState(() => _permissionState = CameraPermissionState.failed);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppReviewStrings.of(context).cameraFailure)),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isRequestingPermission = false);
+      }
     }
+  }
+
+  Future<void> _startCamera() async {
+    if (_isStartingCamera || controller.value.isRunning) return;
+    _isStartingCamera = true;
+    try {
+      await controller.start();
+      if (!mounted) return;
+      setState(() => _cameraStartFailed = false);
+      _startSteadyHintTimer();
+    } catch (error, stack) {
+      if (kDebugMode) {
+        debugPrint('[CAMERA] Start failed: $error\n$stack');
+      }
+      if (!mounted) return;
+      setState(() => _cameraStartFailed = true);
+    } finally {
+      _isStartingCamera = false;
+    }
+  }
+
+  Future<void> _showOpenSettingsDialog() async {
+    final strings = AppReviewStrings.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(strings.allowCamera),
+        content: Text(strings.cameraPermanentlyDenied),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(strings.cancel),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              final opened = await _permissionCoordinator.openSettings();
+              if (kDebugMode && !opened) {
+                debugPrint('[CAMERA_PERMISSION] App settings did not open.');
+              }
+            },
+            child: Text(strings.openSettings),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _steadyHintTimer?.cancel();
     controller.dispose();
     super.dispose();
@@ -407,7 +506,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('مسح الباركود'),
-          actions: _permissionStatus.isGranted
+          actions:
+              _permissionState == CameraPermissionState.granted &&
+                  !_cameraStartFailed
               ? [
                   IconButton(
                     tooltip: 'تشغيل الفلاش',
@@ -433,58 +534,20 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   Widget _buildBody() {
-    if (_isCheckingPermission) {
+    if (_permissionState == CameraPermissionState.checking) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (!_permissionStatus.isGranted) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.camera_alt_outlined,
-                size: 80,
-                color: Colors.grey,
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'نحتاج إذن الكاميرا فقط لمسح باركود المنتج. يمكنك البحث يدوياً إذا لم ترغب بمنح الإذن.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'يستخدم التطبيق الكاميرا فقط للبحث عن المنتج بسرعة. لا يتم تصوير أو تخزين أو إرسال صور من الكاميرا.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, color: Colors.grey),
-              ),
-              const SizedBox(height: 32),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  OutlinedButton(
-                    onPressed: () => context.pop(),
-                    child: const Text('رجوع'),
-                  ),
-                  const SizedBox(width: 16),
-                  FilledButton.icon(
-                    onPressed: _showManualInputDialog,
-                    icon: const Icon(Icons.search),
-                    label: const Text('بحث يدوي'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: _requestPermission,
-                child: const Text('منح إذن الكاميرا'),
-              ),
-            ],
-          ),
-        ),
+    if (_permissionState != CameraPermissionState.granted ||
+        _cameraStartFailed) {
+      return CameraPermissionPrompt(
+        requesting: _isRequestingPermission,
+        cameraStartFailed: _cameraStartFailed,
+        onBack: () => context.pop(),
+        onManualSearch: _showManualInputDialog,
+        onRequestPermission: _cameraStartFailed
+            ? _startCamera
+            : _requestPermission,
       );
     }
 

@@ -14,7 +14,7 @@ add_action('template_redirect', function() {
         $whatsapp = get_user_meta($user_id, 'account_whatsapp', true);
         $account_type = get_user_meta($user_id, 'account_type', true);
 
-        if (empty($company_name) || empty($phone) || empty($whatsapp) || empty($account_type)) {
+        if (empty($company_name) || empty($account_type)) {
             wc_add_notice('يرجى استكمال بيانات حسابك قبل المتابعة.', 'error');
             wp_redirect(get_permalink(get_option('woocommerce_myaccount_page_id')));
             exit;

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lpco_llc/core/config/app_config.dart';
+import 'package:lpco_llc/core/l10n/app_review_strings.dart';
+import 'package:lpco_llc/core/utils/phone_number.dart';
 import 'package:lpco_llc/features/auth/presentation/cubit/auth_cubit.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -20,8 +22,31 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _phoneController;
   late final TextEditingController _addressController;
 
-   bool _initialized = false;
+  bool _initialized = false;
   bool _submitted = false;
+
+  String get _normalizedPhone => PhoneNumber.combine(
+    countryCode: _phoneCodeController.text,
+    subscriberNumber: _phoneController.text,
+  );
+
+  String? _validatePhone(String? value) {
+    if ((value ?? '').trim().isEmpty) {
+      return null;
+    }
+    return PhoneNumber.validateOptional(
+      '${_phoneCodeController.text.trim()}${value!.trim()}',
+    );
+  }
+
+  String? _validatePhoneCode(String? value) {
+    if (_phoneController.text.trim().isEmpty) {
+      return null;
+    }
+    return RegExp(r'^\+\d{1,4}$').hasMatch(value?.trim() ?? '')
+        ? null
+        : 'رمز غير صالح';
+  }
 
   @override
   void didChangeDependencies() {
@@ -32,7 +57,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         final user = auth.user;
         _companyController = TextEditingController(text: user.companyName);
         _provinceController = TextEditingController(text: user.city);
-        
+
         // Handle phone splitting if possible, or just put it in the phone field
         String phoneCode = '+963';
         String phoneNum = user.phone;
@@ -43,7 +68,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             phoneNum = user.phone.substring(4);
           }
         }
-        
+
         _phoneCodeController = TextEditingController(text: phoneCode);
         _phoneController = TextEditingController(text: phoneNum);
         _addressController = TextEditingController(text: user.address);
@@ -78,11 +103,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     });
 
     context.read<AuthCubit>().updateProfile(
-          company: _companyController.text.trim(),
-          province: _provinceController.text.trim(),
-          phone: '${_phoneCodeController.text.trim()}${_phoneController.text.trim()}',
-          address: _addressController.text.trim(),
-        );
+      company: _companyController.text.trim(),
+      province: _provinceController.text.trim(),
+      phone: _normalizedPhone,
+      address: _addressController.text.trim(),
+    );
   }
 
   @override
@@ -92,10 +117,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         if (state is AuthError) {
           _submitted = false;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(state.message),
-              backgroundColor: Colors.red,
-            ),
+            SnackBar(content: Text(state.message), backgroundColor: Colors.red),
           );
         } else if (_submitted && state is Authenticated) {
           _submitted = false;
@@ -109,9 +131,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         }
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('تحديث بيانات المستخدم'),
-        ),
+        appBar: AppBar(title: const Text('تحديث بيانات المستخدم')),
         body: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -122,10 +142,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 children: [
                   const Text(
                     'تعديل المعلومات الشخصية',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 20),
                   TextFormField(
@@ -134,8 +151,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       labelText: 'الاسم التجاري *',
                       border: OutlineInputBorder(),
                     ),
-                    validator: (value) =>
-                        value == null || value.trim().isEmpty ? 'حقل مطلوب' : null,
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'حقل مطلوب'
+                        : null,
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
@@ -173,8 +191,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             labelText: 'الرمز',
                             border: OutlineInputBorder(),
                           ),
-                          validator: (value) =>
-                              value == null || value.trim().isEmpty ? 'مطلوب' : null,
+                          validator: _validatePhoneCode,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -182,17 +199,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         child: TextFormField(
                           controller: _phoneController,
                           keyboardType: TextInputType.phone,
-                          decoration: const InputDecoration(
-                            labelText: 'رقم الهاتف *',
+                          decoration: InputDecoration(
+                            labelText: AppReviewStrings.of(
+                              context,
+                            ).phoneOptional,
                             border: OutlineInputBorder(),
                           ),
-                          validator: (value) =>
-                              value == null || value.trim().isEmpty
-                                  ? 'حقل مطلوب'
-                                  : null,
+                          validator: _validatePhone,
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    AppReviewStrings.of(context).phoneContactWarning,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -203,8 +226,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       labelText: 'العنوان بالتفصيل *',
                       border: OutlineInputBorder(),
                     ),
-                    validator: (value) =>
-                        value == null || value.trim().isEmpty ? 'حقل مطلوب' : null,
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'حقل مطلوب'
+                        : null,
                   ),
                   const SizedBox(height: 32),
                   BlocBuilder<AuthCubit, AuthState>(

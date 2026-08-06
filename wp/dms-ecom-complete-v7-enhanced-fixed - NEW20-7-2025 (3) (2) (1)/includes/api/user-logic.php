@@ -104,7 +104,11 @@ function dms_validate_jwt_request($request = null) {
     }
     
     if (isset($validation->data->user->id)) {
-        wp_set_current_user($validation->data->user->id);
+        $validated_user_id = absint($validation->data->user->id);
+        if ($validated_user_id <= 0 || !get_userdata($validated_user_id)) {
+            return new WP_Error('jwt_user_not_found', 'الحساب المرتبط برمز الدخول غير موجود.', array('status' => 401));
+        }
+        wp_set_current_user($validated_user_id);
     }
     
     return true;
@@ -197,7 +201,11 @@ function dms_update_user_profile($request) {
     
     $company = sanitize_text_field($params['company'] ?? ($params['company_name'] ?? ''));
     $province = sanitize_text_field($params['province'] ?? ($params['governorate'] ?? ($params['billing_state'] ?? '')));
-    $phone = sanitize_text_field($params['phone'] ?? '');
+    $phone_provided = array_key_exists('phone', $params) || array_key_exists('billing_phone', $params);
+    $phone = dms_normalize_optional_phone($params['phone'] ?? ($params['billing_phone'] ?? ''));
+    if (is_wp_error($phone)) {
+        return $phone;
+    }
     $address = sanitize_text_field($params['address'] ?? ($params['billing_address_1'] ?? ''));
     
     if (!empty($company)) {
@@ -212,10 +220,16 @@ function dms_update_user_profile($request) {
         update_user_meta($user_id, 'province', $province);
     }
     
-    if (!empty($phone)) {
-        update_user_meta($user_id, 'account_whatsapp', $phone);
-        update_user_meta($user_id, 'billing_phone', $phone);
-        update_user_meta($user_id, 'phone', $phone);
+    if ($phone_provided) {
+        if ($phone === '') {
+            delete_user_meta($user_id, 'account_whatsapp');
+            delete_user_meta($user_id, 'billing_phone');
+            delete_user_meta($user_id, 'phone');
+        } else {
+            update_user_meta($user_id, 'account_whatsapp', $phone);
+            update_user_meta($user_id, 'billing_phone', $phone);
+            update_user_meta($user_id, 'phone', $phone);
+        }
     }
     
     if (!empty($address)) {
@@ -315,6 +329,12 @@ function dms_register_user($request) {
         return new WP_Error('email_exists', 'البريد الإلكتروني مستخدم بالفعل.', array('status' => 400));
     }
 
+    $meta = (isset($params['meta']) && is_array($params['meta'])) ? $params['meta'] : array();
+    $phone = dms_normalize_optional_phone($params['phone'] ?? ($params['billing_phone'] ?? ($meta['phone'] ?? '')));
+    if (is_wp_error($phone)) {
+        return $phone;
+    }
+
     $user_id = wp_create_user($username, $password, $email);
     if (is_wp_error($user_id)) return new WP_Error('registration_failed', 'تعذر إكمال إنشاء الحساب حالياً.', array('status' => 500));
 
@@ -329,9 +349,8 @@ function dms_register_user($request) {
     $default_status = function_exists('dms_get_default_account_status') ? dms_get_default_account_status() : 'جديد';
     update_user_meta($user_id, 'dms_account_status', $default_status);
     
-    $meta = (isset($params['meta']) && is_array($params['meta'])) ? $params['meta'] : array();
     $extra = array(
-        'phone' => sanitize_text_field($params['phone'] ?? ($params['billing_phone'] ?? ($meta['phone'] ?? ''))),
+        'phone' => $phone,
         'company' => sanitize_text_field($params['company'] ?? ($params['billing_company'] ?? ($meta['company'] ?? ''))),
         'whatsapp' => sanitize_text_field($params['whatsapp'] ?? ($meta['whatsapp'] ?? '')),
         'whatsapp_country_code' => sanitize_text_field($params['whatsapp_country_code'] ?? ($meta['whatsapp_country_code'] ?? '')),
@@ -362,6 +381,32 @@ function dms_register_user($request) {
         'email' => $email,
         'message' => 'تم إنشاء الحساب بنجاح'
     );
+}
+
+/**
+ * Normalize an optional international phone number without inventing a value.
+ * Empty and null values are valid; formatting is checked only when supplied.
+ */
+function dms_normalize_optional_phone($value) {
+    if ($value === null) {
+        return '';
+    }
+
+    $raw = trim(sanitize_text_field((string) $value));
+    if ($raw === '') {
+        return '';
+    }
+    if (!preg_match('/^\+?[0-9\s().-]+$/', $raw)) {
+        return new WP_Error('invalid_phone', 'صيغة رقم الهاتف غير صحيحة.', array('status' => 400));
+    }
+
+    $has_plus = strpos($raw, '+') === 0;
+    $digits = preg_replace('/\D+/', '', $raw);
+    $length = strlen($digits);
+    if ($length < 7 || $length > 15) {
+        return new WP_Error('invalid_phone', 'رقم الهاتف يجب أن يتكون من 7 إلى 15 رقماً.', array('status' => 400));
+    }
+    return ($has_plus ? '+' : '') . $digits;
 }
 
 /**

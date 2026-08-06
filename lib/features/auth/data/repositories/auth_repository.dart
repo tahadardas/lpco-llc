@@ -189,6 +189,7 @@ class AuthRepository {
     required String phone,
     required String address,
   }) async {
+    final normalizedPhone = phone.trim();
     await _dio.post(
       '/dms/v1/user/$userId',
       options: _client.buildOptions(cachePolicy: CachePolicy.noCache),
@@ -198,7 +199,7 @@ class AuthRepository {
         'province': province.trim(),
         'governorate': province.trim(),
         'billing_state': province.trim(),
-        'phone': phone.trim(),
+        'phone': normalizedPhone.isEmpty ? null : normalizedPhone,
         'address': address.trim(),
         'billing_address_1': address.trim(),
       },
@@ -224,8 +225,8 @@ class AuthRepository {
     final generatedEmail = _normalizeEmail(
       email: email,
       username: normalizedUsername,
-      phone: phone,
     );
+    final normalizedPhone = phone.trim();
 
     try {
       await _dio.post(
@@ -245,7 +246,7 @@ class AuthRepository {
           'province': province.trim(),
           'governorate': province.trim(),
           'billing_state': province.trim(),
-          'phone': phone.trim(),
+          if (normalizedPhone.isNotEmpty) 'phone': normalizedPhone,
           'address': address.trim(),
         },
       );
@@ -315,18 +316,14 @@ class AuthRepository {
     return _storageService.getUser();
   }
 
-  String _normalizeEmail({
-    String? email,
-    required String username,
-    required String phone,
-  }) {
+  String _normalizeEmail({String? email, required String username}) {
     final candidate = (email ?? '').trim().toLowerCase();
     final regex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
     if (regex.hasMatch(candidate)) {
       return candidate;
     }
 
-    final base = (username.isNotEmpty ? username : phone)
+    final base = username
         .replaceAll(RegExp('[^a-zA-Z0-9._-]'), '')
         .toLowerCase();
 
