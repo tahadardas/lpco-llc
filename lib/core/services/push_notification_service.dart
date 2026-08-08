@@ -40,6 +40,8 @@ class PushNotificationService {
   static const String _fallbackTokenPrefix = 'lpco-fallback-';
   static const String _notificationChannelId = 'LPCO_Notifications';
   static const String _notificationChannelName = 'LPCO Notifications';
+  static const int _appleTokenMaxAttempts = 20;
+  static const Duration _appleTokenRetryDelay = Duration(milliseconds: 500);
 
   static const AndroidNotificationChannel _androidChannel =
       AndroidNotificationChannel(
@@ -154,8 +156,16 @@ class PushNotificationService {
     final messaging = _fcm ?? FirebaseMessaging.instance;
     _fcm = messaging;
 
+    if (!await _waitForApplePushToken(messaging)) {
+      return;
+    }
+
     final storedToken = (await _storageService.getDeviceToken() ?? '').trim();
-    var resolvedToken = storedToken;
+    var resolvedToken =
+        defaultTargetPlatform == TargetPlatform.iOS &&
+            storedToken.startsWith(_fallbackTokenPrefix)
+        ? ''
+        : storedToken;
 
     try {
       final firebaseToken = (await messaging.getToken() ?? '').trim();
@@ -168,6 +178,9 @@ class PushNotificationService {
     }
 
     if (resolvedToken.isEmpty) {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        return;
+      }
       resolvedToken = await _resolveFallbackToken();
     }
 
@@ -176,6 +189,36 @@ class PushNotificationService {
     }
 
     await _registerDeviceToken(resolvedToken);
+  }
+
+  Future<bool> _waitForApplePushToken(FirebaseMessaging messaging) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return true;
+    }
+
+    Object? lastError;
+    for (var attempt = 0; attempt < _appleTokenMaxAttempts; attempt++) {
+      try {
+        final token = (await messaging.getAPNSToken() ?? '').trim();
+        if (token.isNotEmpty) {
+          return true;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+
+      if (attempt + 1 < _appleTokenMaxAttempts) {
+        await Future<void>.delayed(_appleTokenRetryDelay);
+      }
+    }
+
+    if (kDebugMode) {
+      debugPrint(
+        'APNs token was not available; FCM registration will retry on the '
+        'next synchronization.${lastError == null ? '' : ' Error: $lastError'}',
+      );
+    }
+    return false;
   }
 
   Future<void> forgetDeviceAfterAccountDeletion() async {
