@@ -108,6 +108,20 @@ function dms_validate_jwt_request($request = null) {
         if ($validated_user_id <= 0 || !get_userdata($validated_user_id)) {
             return new WP_Error('jwt_user_not_found', 'الحساب المرتبط برمز الدخول غير موجود.', array('status' => 401));
         }
+
+        // إبطال التوكن إذا تم تعيين/تغيير كلمة المرور بعد تاريخ إصداره
+        $not_before = (int) get_user_meta($validated_user_id, 'dms_jwt_not_before', true);
+        if ($not_before > 0) {
+            $token_parts = explode('.', $token);
+            if (count($token_parts) === 3) {
+                $payload_raw = function_exists('dms_base64url_decode') ? dms_base64url_decode($token_parts[1]) : base64_decode($token_parts[1]);
+                $payload_data = json_decode($payload_raw);
+                if ($payload_data && isset($payload_data->iat) && intval($payload_data->iat) < $not_before) {
+                    return new WP_Error('jwt_token_revoked', 'تم تغيير كلمة المرور، يرجى تسجيل الدخول مجدداً.', array('status' => 401));
+                }
+            }
+        }
+
         wp_set_current_user($validated_user_id);
     }
     
