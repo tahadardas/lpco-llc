@@ -92,6 +92,24 @@ add_action('rest_api_init', function () {
         ),
     ));
 
+    register_rest_route('dms/v1/admin', '/members/(?P<id>\d+)/password', array(
+        'methods' => WP_REST_Server::CREATABLE,
+        'callback' => 'dms_admin_set_member_password_v2',
+        'permission_callback' => 'dms_admin_permissions',
+        'args' => array(
+            'password' => array(
+                'type' => 'string',
+                'required' => false,
+                'sanitize_callback' => 'sanitize_text_field',
+            ),
+            'generate' => array(
+                'type' => 'boolean',
+                'required' => false,
+                'default' => false,
+            ),
+        ),
+    ));
+
     register_rest_route('dms/v1/admin', '/orders/(?P<id>\d+)', array(
         'methods' => WP_REST_Server::READABLE,
         'callback' => 'dms_admin_get_order_details',
@@ -2141,6 +2159,38 @@ if (!function_exists('dms_admin_delete_member_v2')) {
         }
 
         return dms_admin_action_response('تم حذف العضو بنجاح.', array('id' => $user_id));
+    }
+}
+
+if (!function_exists('dms_admin_set_member_password_v2')) {
+    function dms_admin_set_member_password_v2(WP_REST_Request $request) {
+        $user_id = (int) $request['id'];
+        $body = dms_admin_request_body_v2($request);
+        $should_generate = !empty($body['generate']);
+        $password = (string) ($body['password'] ?? '');
+
+        if ($should_generate || empty($password)) {
+            $password = wp_generate_password(16, true, true);
+        }
+
+        if (function_exists('dms_execute_password_set')) {
+            $result = dms_execute_password_set($user_id, $password, 'rest_api');
+            if (is_wp_error($result)) {
+                return $result;
+            }
+        } else {
+            return new WP_Error('internal_error', 'Password management function missing', array('status' => 500));
+        }
+
+        $user = get_userdata($user_id);
+        return dms_admin_action_response(
+            'تم تعيين كلمة المرور بنجاح.',
+            array(
+                'user_id' => $user_id,
+                'user_login' => $user ? $user->user_login : '',
+                'generated_password' => $should_generate ? $password : '',
+            )
+        );
     }
 }
 

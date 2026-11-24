@@ -8,6 +8,9 @@ import 'package:lpco_llc/features/admin/presentation/screens/admin_dashboard_scr
 import 'package:lpco_llc/features/admin/presentation/screens/admin_module_screen.dart';
 import 'package:lpco_llc/features/admin/presentation/screens/admin_order_details_screen.dart';
 import 'package:lpco_llc/features/account/presentation/screens/account_screen.dart';
+import 'package:lpco_llc/features/account/presentation/screens/account_settings_screen.dart';
+import 'package:lpco_llc/features/account/presentation/screens/account_management_screen.dart';
+import 'package:lpco_llc/features/account/presentation/screens/delete_account_screen.dart';
 import 'package:lpco_llc/features/account/presentation/screens/edit_profile_screen.dart';
 import 'package:lpco_llc/features/account/presentation/screens/security_settings_screen.dart';
 import 'package:lpco_llc/features/auth/presentation/cubit/auth_cubit.dart';
@@ -330,6 +333,39 @@ class AppRouter {
               GoRoute(
                 path: AppRoutePaths.editProfile,
                 builder: (context, state) => const EditProfileScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.accountSettings,
+                redirect: (context, _) {
+                  final auth = context.read<AuthCubit>().state;
+                  if (auth is Authenticated) return null;
+                  return AppRoutePaths.loginRedirect(
+                    AppRoutePaths.accountSettings,
+                  );
+                },
+                builder: (context, state) => const AccountSettingsScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.accountManagement,
+                redirect: (context, _) {
+                  final auth = context.read<AuthCubit>().state;
+                  if (auth is Authenticated) return null;
+                  return AppRoutePaths.loginRedirect(
+                    AppRoutePaths.accountManagement,
+                  );
+                },
+                builder: (context, state) => const AccountManagementScreen(),
+              ),
+              GoRoute(
+                path: AppRoutePaths.deleteAccount,
+                redirect: (context, _) {
+                  final auth = context.read<AuthCubit>().state;
+                  if (auth is Authenticated) return null;
+                  return AppRoutePaths.loginRedirect(
+                    AppRoutePaths.deleteAccount,
+                  );
+                },
+                builder: (context, state) => const DeleteAccountScreen(),
               ),
             ],
           ),

@@ -239,6 +239,7 @@ class OrderRepository {
     String country = 'SY',
   }) async {
     final orderUuid = _uuidGenerator();
+    final normalizedPhone = phone.trim();
 
     final payload = <String, dynamic>{
       'order_uuid': orderUuid,
@@ -250,7 +251,7 @@ class OrderRepository {
       'billing': <String, dynamic>{
         'first_name': contactName,
         'last_name': contactName,
-        'phone': phone,
+        if (normalizedPhone.isNotEmpty) 'phone': normalizedPhone,
         'company': company,
         'address_1': address,
         'address_2': '',
@@ -269,7 +270,7 @@ class OrderRepository {
         'state': state,
         'postcode': postcode,
         'country': country,
-        'phone': phone,
+        if (normalizedPhone.isNotEmpty) 'phone': normalizedPhone,
       },
       'line_items': lineItems,
       'customer_note': orderComments,
@@ -278,7 +279,8 @@ class OrderRepository {
         {'key': 'dms_price_group', 'value': userGroup},
         {'key': 'dms_currency', 'value': currency},
         {'key': 'order_contact_name', 'value': contactName},
-        {'key': 'order_phone', 'value': phone},
+        if (normalizedPhone.isNotEmpty)
+          {'key': 'order_phone', 'value': normalizedPhone},
         {'key': 'order_address', 'value': address},
         {'key': 'order_city', 'value': city},
         {'key': 'order_state', 'value': state},

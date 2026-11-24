@@ -15,6 +15,9 @@ class AppRoutePaths {
   static const String contact = '/contact';
   static const String security = '/security';
   static const String editProfile = '/edit-profile';
+  static const String accountSettings = '/account-settings';
+  static const String accountManagement = '/account-management';
+  static const String deleteAccount = '/delete-account';
   static const String admin = '/admin';
   static const String scanner = '/scanner';
   static const String login = '/login';

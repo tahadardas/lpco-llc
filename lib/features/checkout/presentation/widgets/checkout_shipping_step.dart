@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:lpco_llc/core/l10n/app_review_strings.dart';
+import 'package:lpco_llc/core/utils/phone_number.dart';
 import 'package:lpco_llc/core/widgets/glass.dart';
 
 class CheckoutShippingStep extends StatelessWidget {
@@ -101,8 +103,17 @@ class CheckoutShippingStep extends StatelessWidget {
             TextFormField(
               controller: phoneController,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'رقم الهاتف *'),
-              validator: requiredValidator,
+              decoration: InputDecoration(
+                labelText: AppReviewStrings.of(context).phoneOptional,
+              ),
+              validator: PhoneNumber.validateOptional,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              AppReviewStrings.of(context).phoneContactWarning,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 10),
             TextFormField(

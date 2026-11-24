@@ -2,7 +2,7 @@
 /*
 Plugin Name: LPCO LLC Commerce API
 Description: نظام تسجيل وتصنيف زبائن وأسعار حسب التصنيف مع استيراد وتصدير، متوافقة مع ووكومرس.
-Version: 7.0
+Version: 7.1.0
 Author: dms
 */
 // القائمة الجانبية الرئيسية
@@ -80,6 +80,7 @@ if (!defined('DMS_ECOM_DEBUG')) {
 
 // Load includes
 include_once DMS_ECOM_PATH . 'includes/members.php';
+include_once DMS_ECOM_PATH . 'includes/password-management.php';
 include_once DMS_ECOM_PATH . 'includes/categories.php';
 include_once DMS_ECOM_PATH . 'includes/products.php';
 include_once DMS_ECOM_PATH . 'includes/product-barcodes.php';
@@ -103,6 +104,7 @@ include_once DMS_ECOM_PATH . 'includes/api/users-routes.php';
 include_once DMS_ECOM_PATH . 'includes/api/catalog-logic.php';
 include_once DMS_ECOM_PATH . 'includes/api/order-logic.php';
 include_once DMS_ECOM_PATH . 'includes/api/user-logic.php';
+include_once DMS_ECOM_PATH . 'includes/api/account-deletion.php';
 include_once DMS_ECOM_PATH . 'includes/admin-dashboard.php';
 include_once DMS_ECOM_PATH . 'includes/admin-endpoints.php';
 include_once DMS_ECOM_PATH . 'includes/app-home-layout.php';

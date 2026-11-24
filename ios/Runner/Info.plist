@@ -45,6 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -62,6 +67,8 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>نستخدم Face ID أو البصمة لحماية دخولك إلى التطبيق.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>تُستخدم الكاميرا لمسح باركود المنتجات داخل تطبيق لبكو. لا يتم التقاط الصور أو تخزينها.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>نحتاج إذنك لحفظ صور المنتجات في معرض الصور.</string>
 </dict>

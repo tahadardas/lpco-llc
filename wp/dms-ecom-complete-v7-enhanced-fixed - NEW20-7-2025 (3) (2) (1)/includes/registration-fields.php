@@ -44,14 +44,14 @@ add_action('woocommerce_register_form_start', function() {
     </p>
 
     <p class="form-row form-row-first" style="width: 25%; float: right; margin-right: 0%;">
-        <label for="account_whatsapp_country_code">رمز الدولة <span class="required">*</span></label>
-        <input type="text" class="input-text" name="account_whatsapp_country_code" id="account_whatsapp_country_code" value="<?php echo isset($_POST['account_whatsapp_country_code']) ? esc_attr($_POST['account_whatsapp_country_code']) : '+'; ?>" placeholder="+XXX" required />
+        <label for="account_whatsapp_country_code">رمز الدولة – اختياري</label>
+        <input type="text" class="input-text" name="account_whatsapp_country_code" id="account_whatsapp_country_code" value="<?php echo isset($_POST['account_whatsapp_country_code']) ? esc_attr($_POST['account_whatsapp_country_code']) : '+963'; ?>" placeholder="+963" />
         <small>مثال: +963</small>
     </p>
     <p class="form-row form-row-last" style="width: 73%; float: left; margin-left: 2%;">
-        <label for="account_whatsapp">رقم الواتساب <span class="required">*</span></label>
-        <input type="text" class="input-text" name="account_whatsapp" id="account_whatsapp" value="<?php echo isset($_POST['account_whatsapp']) ? esc_attr($_POST['account_whatsapp']) : ''; ?>" required />
-        <small>يرجى كتابة رقم الواتساب الفعّال للتواصل.</small>
+        <label for="account_whatsapp">رقم الهاتف – اختياري</label>
+        <input type="text" class="input-text" name="account_whatsapp" id="account_whatsapp" value="<?php echo isset($_POST['account_whatsapp']) ? esc_attr($_POST['account_whatsapp']) : ''; ?>" />
+        <small>إذا لم تضف رقم هاتف فلن نتمكن من التواصل معك بخصوص حسابك أو طلبك.</small>
     </p>
     <div class="clear"></div>
     <?php
@@ -62,13 +62,12 @@ add_action('woocommerce_register_post', function($username, $email, $validation_
     if (empty($_POST['account_company_name'])) {
         $validation_errors->add('account_company_name_error', 'الرجاء إدخال الاسم التجاري.');
     }
-    if (empty($_POST['account_whatsapp'])) {
-        $validation_errors->add('account_whatsapp_error', 'الرجاء إدخال رقم الواتساب.');
-    }
+    $phone = isset($_POST['account_whatsapp']) ? trim(sanitize_text_field(wp_unslash($_POST['account_whatsapp']))) : '';
     $country_code = isset($_POST['account_whatsapp_country_code']) ? sanitize_text_field($_POST['account_whatsapp_country_code']) : '';
-    if (empty($country_code)) {
-        $validation_errors->add('account_whatsapp_country_code_error', 'الرجاء إدخال رمز الدولة للواتساب.');
-    } elseif (!preg_match('/^\+\d+$/', $country_code)) {
+    if ($phone !== '' && !preg_match('/^[0-9\s().-]{7,20}$/', $phone)) {
+        $validation_errors->add('account_whatsapp_error', 'صيغة رقم الهاتف غير صحيحة.');
+    }
+    if ($phone !== '' && !preg_match('/^\+\d{1,4}$/', $country_code)) {
         $validation_errors->add('account_whatsapp_country_code_format_error', 'صيغة رمز الدولة غير صحيحة. يجب أن تبدأ بـ "+" وتتبعها أرقام فقط (مثال: +963).');
     }
     if (empty($_POST['account_governorate'])) {
@@ -91,7 +90,7 @@ add_action('woocommerce_created_customer', function($customer_id) {
     if (!empty($_POST['account_whatsapp'])) {
         update_user_meta($customer_id, 'account_whatsapp', sanitize_text_field($_POST['account_whatsapp']));
     }
-    if (!empty($_POST['account_whatsapp_country_code'])) {
+    if (!empty($_POST['account_whatsapp']) && !empty($_POST['account_whatsapp_country_code'])) {
         update_user_meta($customer_id, 'account_whatsapp_country_code', sanitize_text_field($_POST['account_whatsapp_country_code']));
     }
     if (!empty($_POST['account_governorate'])) {

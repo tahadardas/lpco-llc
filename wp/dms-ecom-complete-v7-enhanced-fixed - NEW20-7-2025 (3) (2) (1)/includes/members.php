@@ -181,6 +181,9 @@ function dms_render_members_page() {
                         // إعادة ربط أحداث الأزرار بعد إضافة عناصر جديدة
                         rebindEditSaveCancelButtons();
                         rebindDeleteButtons(); // أعد ربط أزرار الحذف
+                        if (typeof window.rebindDmsPasswordButtons === 'function') {
+                            window.rebindDmsPasswordButtons();
+                        }
                     } else {
                         console.error('AJAX Error:', response.data);
                         // عرض رسالة خطأ للمستخدم
@@ -473,6 +476,13 @@ function dms_load_more_members_callback() {
             <td class='view-mode'><?php echo esc_html($status); ?></td>
             <td class='view-mode'>
                 <button type='button' class='button edit-btn' data-userid='<?php echo esc_attr($user->ID); ?>'>✏️ تعديل</button>
+                <button type='button' class='button dms-open-pwd-modal-btn' 
+                    data-userid='<?php echo esc_attr($user->ID); ?>'
+                    data-name='<?php echo esc_attr($user->display_name); ?>'
+                    data-company='<?php echo esc_attr($company_name); ?>'
+                    data-username='<?php echo esc_attr($user->user_login); ?>'
+                    data-phone='<?php echo esc_attr(trim($whatsapp_country_code . ' ' . $whatsapp)); ?>'
+                    title='تعيين كلمة مرور جديدة'>🔑 كلمة المرور</button>
                 <button type='button' class='button delete-btn' data-userid='<?php echo esc_attr($user->ID); ?>' data-confirm="false">❌ حذف</button>
             </td>
         </tr>

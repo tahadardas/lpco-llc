@@ -15,9 +15,9 @@ add_action('woocommerce_edit_account_form', function() {
         </p>
 
         <p class="form-row form-row-wide">
-            <label for="account_whatsapp">رقم الواتساب <span class="required">*</span></label>
+            <label for="account_whatsapp">رقم الهاتف – اختياري</label>
             <input type="text" class="input-text" name="account_whatsapp" id="account_whatsapp" value="<?php echo esc_attr($whatsapp); ?>" />
-            <small>يرجى كتابة رقم الواتساب الفعّال للتواصل.</small>
+            <small>إذا لم تضف رقم هاتف فلن نتمكن من التواصل معك بخصوص حسابك أو طلبك.</small>
         </p>
     </fieldset>
     <?php
@@ -40,7 +40,6 @@ add_action('woocommerce_before_my_account', function() {
 
     $fields = [
         'account_company_name',
-        'account_whatsapp',
     ];
 
     $missing = [];

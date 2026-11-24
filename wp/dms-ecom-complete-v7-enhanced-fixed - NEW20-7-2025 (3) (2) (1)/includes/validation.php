@@ -65,7 +65,7 @@ class Validator {
      */
     public static function validate_phone($phone) {
         if (empty($phone)) {
-            return new \WP_Error('empty_phone', 'رقم الهاتف مطلوب');
+            return '';
         }
         
         // Simple phone validation - can be extended

@@ -58,10 +58,11 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_IOS_API_KEY',
-    appId: '1:000000000000:ios:0000000000000000000000',
-    messagingSenderId: '000000000000',
-    projectId: 'REPLACE_WITH_PROJECT_ID',
+    apiKey: 'AIzaSyCfVj4_JwAc92NQWNErNXfzMZSID7iTWCM',
+    appId: '1:434792367249:ios:bc9a44f404c82902a16b30',
+    messagingSenderId: '434792367249',
+    projectId: 'lpco-llc-730ab',
+    storageBucket: 'lpco-llc-730ab.firebasestorage.app',
     iosBundleId: 'com.lpco.store',
   );
 
